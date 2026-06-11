@@ -1,5 +1,8 @@
 # Secrets & session — JANGAN PERNAH commit
 .env
+service-account.json
+service-account*.json
+*-credentials.json
 session/
 uploads/
 *.db

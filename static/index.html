@@ -165,9 +165,11 @@ majoo</textarea>
     </div>
 
     <div class="tab-pane" data-pane="history">
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap">
         <span style="color:var(--muted);font-size:12px">100 blast terakhir, lintas semua user</span>
         <span style="flex:1"></span>
+        <span id="sheetStatus" style="font-size:12px;color:var(--muted)"></span>
+        <button id="exportSheetBtn" style="display:none">📊 Export ke Google Sheet</button>
         <button class="ghost" id="refreshHistory">Refresh</button>
       </div>
       <div class="scroll"><table id="historyTable">
@@ -364,6 +366,45 @@ $$('.tab').forEach(t => t.addEventListener('click', () => {
 
 $('#refreshHistory').addEventListener('click', loadHistory);
 
+// Google Sheets export
+let sheetCfg = null;
+async function loadSheetStatus() {
+  try {
+    const r = await fetch('/api/sheet-status').then(r => r.json());
+    sheetCfg = r;
+    if (r.enabled) {
+      $('#exportSheetBtn').style.display = '';
+      $('#sheetStatus').innerHTML = `Sheet: <a href="${r.sheet_url}" target="_blank" style="color:var(--teal)">${esc(r.sheet_name)}</a>`;
+    } else {
+      $('#sheetStatus').textContent = 'Sheets export belum aktif';
+    }
+  } catch (e) {}
+}
+
+$('#exportSheetBtn').addEventListener('click', async () => {
+  const btn = $('#exportSheetBtn');
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '⏳ Exporting...';
+  try {
+    const r = await fetch('/api/export-sheet', { method: 'POST' });
+    if (!r.ok) {
+      alert('Export gagal: ' + await r.text());
+      return;
+    }
+    const d = await r.json();
+    btn.textContent = `✅ ${d.rows} baris ke-export`;
+    setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 3000);
+    if (sheetCfg && sheetCfg.sheet_url) {
+      window.open(sheetCfg.sheet_url, '_blank');
+    }
+  } catch (e) {
+    alert('Export error: ' + e.message);
+    btn.textContent = original;
+    btn.disabled = false;
+  }
+});
+
 async function loadHistory() {
   const r = await fetch('/api/history').then(r => r.json()).catch(() => ({logs:[]}));
   const tb = $('#historyTable tbody');
@@ -396,6 +437,7 @@ function esc(s) { return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<
 loadMe().then(() => {
   pollStatus();
   setInterval(pollStatus, 2500);
+  loadSheetStatus();
 });
 </script>
 </body>

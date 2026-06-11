@@ -41,6 +41,9 @@ func main() {
 	if err := initAudit(); err != nil {
 		log.Fatalf("audit: %v", err)
 	}
+	if err := initSheets(); err != nil {
+		log.Fatalf("sheets: %v", err)
+	}
 
 	rootCtx := context.Background()
 	dbLog := waLog.Stdout("Database", "WARN", true)
@@ -96,6 +99,8 @@ func main() {
 	mux.HandleFunc("/api/blast", corsMiddleware(requireAuth(handleBlast)))
 	mux.HandleFunc("/api/progress", corsMiddleware(requireAuth(handleProgress)))
 	mux.HandleFunc("/api/history", corsMiddleware(requireAuth(handleHistory)))
+	mux.HandleFunc("/api/sheet-status", corsMiddleware(requireAuth(handleSheetStatus)))
+	mux.HandleFunc("/api/export-sheet", corsMiddleware(requireAuth(handleExportSheet)))
 
 	addr := os.Getenv("ADDR")
 	if addr == "" {

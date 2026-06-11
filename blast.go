@@ -278,6 +278,11 @@ func runBlast(ctx context.Context, job *BlastJob) {
 			job.mu.Unlock()
 		}
 
+		// Persist per-recipient detail untuk export ke Sheets nanti
+		if err := recordRecipient(job.auditID, rec); err != nil {
+			fmt.Println("warn: recordRecipient failed for", rec.Phone, ":", err)
+		}
+
 		if i < len(job.Items)-1 {
 			d := job.MinDelay + rand.Intn(job.MaxDelay-job.MinDelay+1)
 			select {
@@ -291,8 +296,10 @@ func runBlast(ctx context.Context, job *BlastJob) {
 func sendOne(phone, body string) error {
 	jid := types.NewJID(phone, types.DefaultUserServer)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
+
+	// 1) cek nomor terdaftar WA
 	res, err := state.client.IsOnWhatsApp(ctx, []string{"+" + phone})
 	if err != nil {
 		return fmt.Errorf("check: %w", err)
@@ -301,6 +308,14 @@ func sendOne(phone, body string) error {
 		return fmt.Errorf("nomor tidak terdaftar di WhatsApp")
 	}
 
+	// 2) pre-fetch device list — bootstrap Signal session ke semua device penerima.
+	// Tanpa ini, kirim pertama ke nomor baru bisa "Waiting for this message" karena
+	// session belum ter-establish. Error di sini non-fatal — coba tetap kirim.
+	if _, e := state.client.GetUserDevicesContext(ctx, []types.JID{jid}); e != nil {
+		fmt.Println("warn: prefetch devices failed for", phone, ":", e)
+	}
+
+	// 3) kirim
 	msg := &waProto.Message{Conversation: proto.String(body)}
 	_, err = state.client.SendMessage(ctx, jid, msg)
 	if err != nil {

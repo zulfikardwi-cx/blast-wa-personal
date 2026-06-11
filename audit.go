@@ -32,6 +32,21 @@ CREATE TABLE IF NOT EXISTS blast_logs (
 );
 CREATE INDEX IF NOT EXISTS idx_blast_logs_started ON blast_logs(started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_blast_logs_user ON blast_logs(user_email);
+
+CREATE TABLE IF NOT EXISTS blast_recipients (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	blast_log_id INTEGER NOT NULL,
+	phone TEXT NOT NULL,
+	nama_outlet TEXT,
+	nomer_invoice TEXT,
+	status TEXT NOT NULL,
+	error TEXT,
+	message TEXT,
+	sent_at TEXT,
+	created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_recipients_blast ON blast_recipients(blast_log_id);
+CREATE INDEX IF NOT EXISTS idx_recipients_phone ON blast_recipients(phone);
 `)
 	if err != nil {
 		return err
@@ -49,6 +64,18 @@ func recordBlastStart(j *BlastJob) (int64, error) {
 		return 0, err
 	}
 	return res.LastInsertId()
+}
+
+// recordRecipient — insert satu baris recipient detail. Dipanggil setelah tiap send selesai.
+func recordRecipient(blastLogID int64, rec *RecipientStatus) error {
+	if blastLogID == 0 {
+		return nil
+	}
+	_, err := auditDB.Exec(
+		`INSERT INTO blast_recipients (blast_log_id, phone, nama_outlet, nomer_invoice, status, error, message, sent_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		blastLogID, rec.Phone, rec.NamaOutlet, rec.NomerInv, rec.Status, rec.Error, rec.Message, rec.SentAt,
+	)
+	return err
 }
 
 func recordBlastEnd(id int64, j *BlastJob) error {

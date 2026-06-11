@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -68,6 +69,12 @@ func initAuth() error {
 		Scopes:       []string{"openid", "email", "profile"},
 		Endpoint:     google.Endpoint,
 	}
+	fmt.Println("=== OAUTH CONFIG ===")
+	fmt.Println("  CLIENT_ID:", clientID[:20]+"..."+clientID[len(clientID)-30:])
+	fmt.Println("  REDIRECT_URL:", redirect)
+	fmt.Println("  FRONTEND_URL:", frontendURL)
+	fmt.Println("  ALLOWED_ORIGINS:", allowedOrigins)
+	fmt.Println("====================")
 	return nil
 }
 
@@ -183,6 +190,7 @@ func handleCallback(w http.ResponseWriter, r *http.Request) {
 		renderAuthError(w, "Gagal set session: "+err.Error())
 		return
 	}
+	log.Println("login:", profile.Email)
 	dest := frontendURL
 	if dest == "" {
 		dest = "/"
@@ -310,6 +318,15 @@ func isSecureRequest(r *http.Request) bool {
 		return true
 	}
 	if r.Header.Get("X-Forwarded-Proto") == "https" {
+		return true
+	}
+	// Cloudflare Quick Tunnel sets Cf-Visitor instead of X-Forwarded-Proto
+	if strings.Contains(r.Header.Get("Cf-Visitor"), `"scheme":"https"`) {
+		return true
+	}
+	// Cloudflare also sets Cf-Connecting-Ip on all tunneled requests — kalau ada
+	// header ini, request pasti datang via Cloudflare yang selalu HTTPS dari sisi client.
+	if r.Header.Get("Cf-Connecting-Ip") != "" {
 		return true
 	}
 	return false
