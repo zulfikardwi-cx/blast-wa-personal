@@ -1,0 +1,19 @@
+# Secrets & session — JANGAN PERNAH commit
+.env
+session/
+uploads/
+*.db
+*.db-journal
+
+# Compiled binary (28MB) — user build sendiri
+blast-wa-personal
+bin/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Logs
+*.log

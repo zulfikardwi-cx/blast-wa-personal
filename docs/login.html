@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Login — Blast WA Personal</title>
+<script src="config.js"></script>
+<style>
+  :root { --bg:#0b1220; --panel:#121a2b; --panel2:#0f1626; --line:#223; --text:#e6ecff; --muted:#8b97b8; --teal:#2DBDB6; --lime:#9ACF87; }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:40px;width:100%;max-width:420px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.4)}
+  .logo{margin-bottom:24px}
+  .logo img{width:140px;height:auto}
+  h1{font-size:18px;font-weight:600;margin:0 0 8px}
+  p.sub{color:var(--muted);font-size:13px;margin:0 0 28px}
+  .btn-google{display:inline-flex;align-items:center;gap:12px;background:#fff;color:#1f2937;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:500;font-size:14px;transition:all .15s;border:0;cursor:pointer}
+  .btn-google:hover{transform:translateY(-1px);box-shadow:0 8px 20px rgba(0,0,0,.3)}
+  .btn-google svg{flex-shrink:0}
+  .domain{margin-top:24px;color:var(--muted);font-size:11px}
+  .domain code{background:var(--panel2);padding:2px 8px;border-radius:4px;color:var(--teal);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .divider{height:1px;background:var(--line);margin:24px 0}
+  .tagline{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
+  .err{color:#fca5a5;font-size:12px;margin-top:12px;display:none}
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">
+      <img src="assets/majoo-logo.svg" alt="majoo" />
+    </div>
+    <div class="tagline">Blast WA Personal</div>
+    <div class="divider"></div>
+    <h1>Login dengan akun majoo</h1>
+    <p class="sub">Sign in untuk mulai blast. Audit log akan tercatat atas nama Anda.</p>
+    <a href="#" id="loginBtn" class="btn-google">
+      <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
+        <path d="M17.64 9.205c0-.639-.057-1.252-.164-1.841H9v3.481h4.844a4.14 4.14 0 01-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4"/>
+        <path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 009 18z" fill="#34A853"/>
+        <path d="M3.964 10.71A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 000 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05"/>
+        <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z" fill="#EA4335"/>
+      </svg>
+      Sign in with Google
+    </a>
+    <div class="domain">Hanya email <code>@majoo.id</code> yang diizinkan</div>
+    <div class="err" id="err"></div>
+  </div>
+
+<script>
+const API_BASE = (window.APP_CONFIG && window.APP_CONFIG.API_BASE) || '';
+if (!API_BASE) {
+  document.getElementById('err').style.display = 'block';
+  document.getElementById('err').textContent = 'API_BASE belum diset di config.js — hubungi admin.';
+}
+document.getElementById('loginBtn').href = API_BASE + '/auth/login';
+
+// Auto-redirect kalau sudah login (cookie valid via cross-site)
+fetch(API_BASE + '/api/me', { credentials: 'include' })
+  .then(r => r.json())
+  .then(d => { if (d && d.user) location.href = 'index.html'; })
+  .catch(() => {});
+</script>
+</body>
+</html>

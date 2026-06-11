@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Blast WA Personal — majoo</title>
+<script src="config.js"></script>
+<style>
+  :root {
+    --bg:#0b1220; --panel:#121a2b; --panel2:#0f1626; --line:#223;
+    --text:#e6ecff; --muted:#8b97b8;
+    --teal:#2DBDB6; --lime:#9ACF87; --teal-soft:rgba(45,189,182,.15);
+    --accent2:#3b82f6; --warn:#f59e0b; --danger:#ef4444;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+  header{padding:14px 24px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:16px;background:var(--panel)}
+  header .logo{height:28px;width:auto;display:block}
+  header .sep{width:1px;height:24px;background:var(--line)}
+  header h1{font-size:14px;margin:0;font-weight:500;color:var(--muted);letter-spacing:.3px}
+  .status-pill{font-size:12px;padding:4px 10px;border-radius:999px;background:#1f2937;color:var(--muted)}
+  .status-pill.ok{background:rgba(45,189,182,.2);color:var(--teal)}
+  .status-pill.warn{background:#78350f;color:#fde68a}
+  .status-pill.err{background:#7f1d1d;color:#fecaca}
+  .user{display:flex;align-items:center;gap:10px;font-size:13px}
+  .user img{width:28px;height:28px;border-radius:50%;border:1px solid var(--line)}
+  .user .uname{line-height:1.2}
+  .user .uname b{display:block;color:var(--text)}
+  .user .uname small{color:var(--muted);font-size:11px}
+  main{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:16px;max-width:1400px;margin:0 auto}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px}
+  .card h2{margin:0 0 12px;font-size:14px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
+  textarea,input[type=text],input[type=number]{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:10px;font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
+  textarea{min-height:160px;resize:vertical}
+  textarea:focus,input:focus{outline:none;border-color:var(--teal)}
+  input[type=file]{font-size:12px;color:var(--muted)}
+  .row{display:flex;gap:12px}
+  .row > *{flex:1}
+  button{background:var(--teal);color:#0b1220;border:0;padding:10px 16px;border-radius:6px;font-weight:600;cursor:pointer;transition:filter .15s}
+  button:hover:not(:disabled){filter:brightness(1.1)}
+  button.secondary{background:var(--accent2);color:#fff}
+  button.ghost{background:transparent;color:var(--text);border:1px solid var(--line)}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  .vars{font-size:12px;color:var(--muted);margin-top:6px}
+  .vars code{background:var(--panel2);padding:2px 6px;border-radius:4px;color:var(--lime)}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  th{color:var(--muted);font-weight:500;background:var(--panel2);position:sticky;top:0}
+  .scroll{max-height:340px;overflow:auto;border:1px solid var(--line);border-radius:6px}
+  .badge{font-size:11px;padding:2px 6px;border-radius:4px}
+  .b-pending{background:#1f2937;color:var(--muted)}
+  .b-sent{background:rgba(154,207,135,.2);color:var(--lime)}
+  .b-failed{background:#7f1d1d;color:#fecaca}
+  .b-skipped{background:#374151;color:#d1d5db}
+  .summary{display:flex;gap:12px;margin-bottom:8px}
+  .stat{flex:1;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:8px;text-align:center}
+  .stat .n{font-size:18px;font-weight:600}
+  .stat .l{font-size:11px;color:var(--muted);text-transform:uppercase}
+  #qrBox{display:none;text-align:center;padding:16px}
+  #qrBox img{background:#fff;padding:8px;border-radius:8px;width:240px;height:240px}
+  .warn{background:#78350f;color:#fde68a;padding:10px;border-radius:6px;font-size:12px;margin-bottom:12px}
+  details summary{cursor:pointer;color:var(--muted);font-size:12px;margin-bottom:8px}
+  .err{color:#fca5a5;font-size:11px}
+  .truncate{max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  pre.preview{background:var(--panel2);border:1px solid var(--line);padding:10px;border-radius:6px;white-space:pre-wrap;font-size:12px;max-height:120px;overflow:auto}
+  .tab-row{display:flex;gap:4px;margin-bottom:12px;border-bottom:1px solid var(--line)}
+  .tab{padding:8px 14px;background:transparent;color:var(--muted);border:0;border-bottom:2px solid transparent;cursor:pointer;font-size:13px;font-weight:500}
+  .tab.active{color:var(--teal);border-bottom-color:var(--teal)}
+  .tab-pane{display:none}
+  .tab-pane.active{display:block}
+  .history-row:hover{background:var(--panel2)}
+  .you-tag{background:var(--teal-soft);color:var(--teal);font-size:10px;padding:1px 5px;border-radius:3px;margin-left:4px}
+  .global-err{background:#7f1d1d;color:#fecaca;padding:10px 24px;font-size:13px}
+</style>
+</head>
+<body>
+<div id="apiErrBanner" class="global-err" style="display:none"></div>
+<header>
+  <img src="assets/majoo-logo.svg" class="logo" alt="majoo" />
+  <div class="sep"></div>
+  <h1>Blast WA Personal</h1>
+  <span id="connStatus" class="status-pill">checking...</span>
+  <span style="flex:1"></span>
+  <div class="user" id="userBox" style="visibility:hidden">
+    <img id="userAvatar" src="" alt="" />
+    <div class="uname"><b id="userName">—</b><small id="userEmail">—</small></div>
+  </div>
+  <button id="logoutBtn" class="ghost" style="display:none">Logout WA</button>
+  <button id="signoutBtn" class="ghost">Sign out</button>
+</header>
+
+<main>
+  <section class="card">
+    <h2>1 · Koneksi WhatsApp</h2>
+    <div id="qrBox">
+      <p style="color:var(--muted);font-size:13px">Scan QR ini di WhatsApp &rsaquo; Linked Devices</p>
+      <img id="qrImg" alt="QR" />
+    </div>
+    <div id="connInfo" style="color:var(--muted);font-size:13px">Memeriksa status...</div>
+
+    <h2 style="margin-top:20px">2 · Template Pesan</h2>
+    <div class="warn">
+      <strong>Anti-banned tips:</strong> jangan blast lebih dari 100&ndash;200 nomor/hari per session, variasikan teks tiap blast, sertakan opt-out.
+    </div>
+    <label>Template</label>
+    <textarea id="template">Halo {{nama_outlet}},
+
+Invoice {{nomer_invoice}} sudah terbit. Mohon segera diproses pembayarannya.
+
+Terima kasih,
+majoo</textarea>
+    <div class="vars">Variabel tersedia: <code>{{nama_outlet}}</code> <code>{{nomer_invoice}}</code></div>
+
+    <div class="row" style="margin-top:12px">
+      <div>
+        <label>Delay min (detik)</label>
+        <input type="number" id="minDelay" value="6" min="2" />
+      </div>
+      <div>
+        <label>Delay max (detik)</label>
+        <input type="number" id="maxDelay" value="14" min="3" />
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>3 · Upload CSV</h2>
+    <label>File CSV — header wajib: <code style="color:var(--lime)">phone,nama_outlet,nomer_invoice</code></label>
+    <input type="file" id="csv" accept=".csv,text/csv" />
+    <details style="margin-top:8px">
+      <summary>Contoh CSV</summary>
+      <pre class="preview">phone,nama_outlet,nomer_invoice
+081234567890,Toko Sambal Pak Budi,INV-2026-0001
+628111234567,Warung Mie Bu Sari,INV-2026-0002</pre>
+    </details>
+
+    <div id="previewBox" style="margin-top:12px;display:none">
+      <label>Preview (5 baris pertama)</label>
+      <div class="scroll"><table id="previewTable"></table></div>
+      <label style="margin-top:8px">Preview pesan baris pertama</label>
+      <pre class="preview" id="msgPreview"></pre>
+    </div>
+
+    <div style="margin-top:16px;display:flex;gap:8px">
+      <button id="startBtn" disabled>Mulai Blast</button>
+      <button id="cancelBtn" class="ghost" style="display:none">Reset</button>
+    </div>
+  </section>
+
+  <section class="card" style="grid-column:1/-1">
+    <div class="tab-row">
+      <button class="tab active" data-tab="progress">Progress</button>
+      <button class="tab" data-tab="history">Riwayat Blast (Audit Log)</button>
+    </div>
+
+    <div class="tab-pane active" data-pane="progress">
+      <div class="summary">
+        <div class="stat"><div class="n" id="sTotal">0</div><div class="l">Total</div></div>
+        <div class="stat"><div class="n" id="sSent" style="color:var(--lime)">0</div><div class="l">Sent</div></div>
+        <div class="stat"><div class="n" id="sFailed" style="color:#fecaca">0</div><div class="l">Failed</div></div>
+        <div class="stat"><div class="n" id="sPending">0</div><div class="l">Pending</div></div>
+      </div>
+      <div class="scroll"><table id="progTable">
+        <thead><tr><th>#</th><th>Phone</th><th>Outlet</th><th>Invoice</th><th>Status</th><th>Pesan / Error</th><th>Sent At</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+    </div>
+
+    <div class="tab-pane" data-pane="history">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+        <span style="color:var(--muted);font-size:12px">100 blast terakhir, lintas semua user</span>
+        <span style="flex:1"></span>
+        <button class="ghost" id="refreshHistory">Refresh</button>
+      </div>
+      <div class="scroll"><table id="historyTable">
+        <thead><tr>
+          <th>Waktu</th><th>User</th><th>Total</th><th>Sent</th><th>Failed</th><th>Durasi</th><th>Template</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table></div>
+    </div>
+  </section>
+</main>
+
+<script>
+const API_BASE = (window.APP_CONFIG && window.APP_CONFIG.API_BASE) || '';
+let parsedRows = [];
+let csvHeader = [];
+let me = null;
+
+const $ = s => document.querySelector(s);
+const $$ = s => document.querySelectorAll(s);
+
+function apiFetch(path, opts = {}) {
+  return fetch(API_BASE + path, { credentials: 'include', ...opts });
+}
+
+function showApiErr(msg) {
+  const b = $('#apiErrBanner');
+  b.textContent = msg;
+  b.style.display = 'block';
+}
+
+async function loadMe() {
+  if (!API_BASE) {
+    showApiErr('API_BASE belum diset di config.js. Edit file ini di repo dan redeploy.');
+    return;
+  }
+  try {
+    const r = await apiFetch('/api/me');
+    const d = await r.json();
+    me = d.user;
+    if (!me) { location.href = 'login.html'; return; }
+    $('#userName').textContent = me.name || me.email;
+    $('#userEmail').textContent = me.email;
+    if (me.picture) $('#userAvatar').src = me.picture;
+    else $('#userAvatar').style.display = 'none';
+    $('#userBox').style.visibility = 'visible';
+  } catch (e) {
+    showApiErr('Tidak bisa konek ke backend (' + API_BASE + '). Cek server jalan & Cloudflare Tunnel aktif.');
+  }
+}
+
+async function pollStatus() {
+  try {
+    const r = await apiFetch('/api/status');
+    if (r.status === 401) { location.href = 'login.html'; return; }
+    const d = await r.json();
+    const pill = $('#connStatus');
+    if (d.loggedIn && d.connected) {
+      pill.textContent = 'WA Connected';
+      pill.className = 'status-pill ok';
+      $('#qrBox').style.display = 'none';
+      $('#connInfo').textContent = 'WhatsApp terhubung. Siap blast.';
+      $('#logoutBtn').style.display = '';
+      updateStartBtn();
+    } else if (d.hasQR) {
+      const q = await apiFetch('/api/qr').then(r => r.json());
+      pill.textContent = 'Scan QR';
+      pill.className = 'status-pill warn';
+      $('#qrBox').style.display = 'block';
+      $('#qrImg').src = 'https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=' + encodeURIComponent(q.code);
+      $('#connInfo').textContent = '';
+      $('#logoutBtn').style.display = 'none';
+    } else {
+      pill.textContent = 'Disconnected';
+      pill.className = 'status-pill';
+      $('#connInfo').textContent = 'Menghubungkan...';
+    }
+  } catch (e) {
+    $('#connStatus').textContent = 'API error';
+    $('#connStatus').className = 'status-pill err';
+  }
+}
+
+$('#csv').addEventListener('change', async (e) => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const text = await f.text();
+  const lines = text.split(/\r?\n/).filter(l => l.trim());
+  csvHeader = lines[0].split(',').map(s => s.trim().toLowerCase());
+  const needed = ['phone','nama_outlet','nomer_invoice'];
+  for (const n of needed) {
+    if (!csvHeader.includes(n)) {
+      alert('Header CSV harus berisi: ' + needed.join(', '));
+      $('#csv').value = '';
+      return;
+    }
+  }
+  parsedRows = lines.slice(1).map(l => {
+    const cols = l.split(',');
+    const o = {};
+    csvHeader.forEach((h,i) => o[h] = (cols[i]||'').trim());
+    return o;
+  });
+  renderPreview();
+  updateStartBtn();
+});
+
+$('#template').addEventListener('input', renderPreview);
+
+function renderPreview() {
+  if (!parsedRows.length) return;
+  $('#previewBox').style.display = '';
+  const tbl = $('#previewTable');
+  tbl.innerHTML = '<thead><tr><th>phone</th><th>nama_outlet</th><th>nomer_invoice</th></tr></thead>';
+  const tb = document.createElement('tbody');
+  parsedRows.slice(0,5).forEach(r => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${esc(r.phone)}</td><td>${esc(r.nama_outlet)}</td><td>${esc(r.nomer_invoice)}</td>`;
+    tb.appendChild(tr);
+  });
+  tbl.appendChild(tb);
+  const first = parsedRows[0];
+  const tpl = $('#template').value;
+  $('#msgPreview').textContent = tpl
+    .replaceAll('{{nama_outlet}}', first.nama_outlet || '')
+    .replaceAll('{{nomer_invoice}}', first.nomer_invoice || '');
+}
+
+function updateStartBtn() {
+  const pill = $('#connStatus').className;
+  $('#startBtn').disabled = !(parsedRows.length && pill.includes('ok'));
+}
+
+$('#startBtn').addEventListener('click', async () => {
+  if (!confirm(`Kirim blast ke ${parsedRows.length} nomor sebagai ${me.email}?\n\nAudit log akan tercatat.`)) return;
+  const tpl = $('#template').value;
+  const file = $('#csv').files[0];
+  const fd = new FormData();
+  fd.append('template', tpl);
+  fd.append('csv', file);
+  fd.append('min_delay', $('#minDelay').value);
+  fd.append('max_delay', $('#maxDelay').value);
+  $('#startBtn').disabled = true;
+  const r = await apiFetch('/api/blast', { method:'POST', body: fd });
+  if (!r.ok) {
+    alert('Gagal mulai: ' + await r.text());
+    $('#startBtn').disabled = false;
+    return;
+  }
+  pollProgress();
+});
+
+$('#logoutBtn').addEventListener('click', async () => {
+  if (!confirm('Logout dari WhatsApp? Sesi akan terhapus dan harus scan QR lagi.')) return;
+  await apiFetch('/api/logout', { method:'POST' });
+  location.reload();
+});
+
+$('#signoutBtn').addEventListener('click', async () => {
+  await apiFetch('/auth/logout', { method:'POST' });
+  location.href = 'login.html';
+});
+
+let progTimer = null;
+function pollProgress() {
+  if (progTimer) return;
+  progTimer = setInterval(async () => {
+    const r = await apiFetch('/api/progress').then(r => r.json());
+    if (!r.job) return;
+    const j = r.job;
+    $('#sTotal').textContent = j.total;
+    $('#sSent').textContent = j.sent;
+    $('#sFailed').textContent = j.failed;
+    $('#sPending').textContent = j.total - j.sent - j.failed - j.skipped;
+    const tb = $('#progTable tbody');
+    tb.innerHTML = '';
+    j.items.forEach((it,i) => {
+      const tr = document.createElement('tr');
+      const cls = { pending:'b-pending', sent:'b-sent', failed:'b-failed', skipped:'b-skipped' }[it.status] || 'b-pending';
+      tr.innerHTML = `
+        <td>${i+1}</td>
+        <td>${esc(it.phone)}</td>
+        <td>${esc(it.nama_outlet||'')}</td>
+        <td>${esc(it.nomer_invoice||'')}</td>
+        <td><span class="badge ${cls}">${it.status}</span></td>
+        <td class="truncate" title="${esc(it.message||it.error||'')}">${it.error ? '<span class="err">'+esc(it.error)+'</span>' : esc((it.message||'').slice(0,80))}</td>
+        <td>${it.sent_at ? new Date(it.sent_at).toLocaleTimeString() : ''}</td>`;
+      tb.appendChild(tr);
+    });
+    if (!j.running) {
+      clearInterval(progTimer); progTimer = null;
+      $('#startBtn').disabled = false;
+      $('#cancelBtn').style.display = '';
+      loadHistory();
+    }
+  }, 1500);
+}
+
+$('#cancelBtn').addEventListener('click', () => {
+  parsedRows = []; csvHeader = [];
+  $('#csv').value = '';
+  $('#previewBox').style.display = 'none';
+  $('#progTable tbody').innerHTML = '';
+  ['sTotal','sSent','sFailed','sPending'].forEach(id => $('#'+id).textContent = '0');
+  $('#cancelBtn').style.display = 'none';
+  updateStartBtn();
+});
+
+$$('.tab').forEach(t => t.addEventListener('click', () => {
+  $$('.tab').forEach(x => x.classList.remove('active'));
+  $$('.tab-pane').forEach(x => x.classList.remove('active'));
+  t.classList.add('active');
+  $(`[data-pane="${t.dataset.tab}"]`).classList.add('active');
+  if (t.dataset.tab === 'history') loadHistory();
+}));
+
+$('#refreshHistory').addEventListener('click', loadHistory);
+
+async function loadHistory() {
+  try {
+    const r = await apiFetch('/api/history').then(r => r.json());
+    const tb = $('#historyTable tbody');
+    tb.innerHTML = '';
+    (r.logs || []).forEach(l => {
+      const tr = document.createElement('tr');
+      tr.className = 'history-row';
+      const isYou = me && l.user_email === me.email;
+      const dur = (l.started_at && l.ended_at)
+        ? Math.round((new Date(l.ended_at) - new Date(l.started_at))/1000) + ' s'
+        : (l.ended_at ? '' : '<em style="color:var(--warn)">running</em>');
+      tr.innerHTML = `
+        <td>${esc(new Date(l.started_at).toLocaleString())}</td>
+        <td>${esc(l.user_name||l.user_email)}${isYou ? '<span class="you-tag">you</span>' : ''}<br><small style="color:var(--muted)">${esc(l.user_email)}</small></td>
+        <td>${l.total}</td>
+        <td style="color:var(--lime)">${l.sent}</td>
+        <td style="color:#fecaca">${l.failed}</td>
+        <td>${dur}</td>
+        <td class="truncate" title="${esc(l.template)}">${esc(l.template.slice(0,80))}${l.template.length>80?'…':''}</td>`;
+      tb.appendChild(tr);
+    });
+    if (!r.logs || !r.logs.length) {
+      tb.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:20px">Belum ada riwayat blast.</td></tr>';
+    }
+  } catch (e) { /* ignore */ }
+}
+
+function esc(s) { return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+loadMe().then(() => {
+  if (me) {
+    pollStatus();
+    setInterval(pollStatus, 2500);
+  }
+});
+</script>
+</body>
+</html>

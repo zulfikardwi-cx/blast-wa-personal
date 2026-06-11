@@ -1,0 +1,321 @@
+package main
+
+import (
+	"context"
+	"encoding/csv"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math/rand"
+	"net/http"
+	"strings"
+	"sync"
+	"time"
+
+	"go.mau.fi/whatsmeow"
+	waProto "go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/types"
+	"google.golang.org/protobuf/proto"
+)
+
+type RecipientStatus struct {
+	Phone      string `json:"phone"`
+	NamaOutlet string `json:"nama_outlet"`
+	NomerInv   string `json:"nomer_invoice"`
+	Message    string `json:"message,omitempty"`
+	Status     string `json:"status"` // pending | sent | failed | skipped
+	Error      string `json:"error,omitempty"`
+	SentAt     string `json:"sent_at,omitempty"`
+}
+
+type BlastJob struct {
+	mu        sync.RWMutex
+	ID        string             `json:"id"`
+	UserEmail string             `json:"user_email"`
+	UserName  string             `json:"user_name"`
+	Template  string             `json:"template"`
+	StartedAt time.Time          `json:"started_at"`
+	EndedAt   *time.Time         `json:"ended_at,omitempty"`
+	Running   bool               `json:"running"`
+	MinDelay  int                `json:"min_delay_sec"`
+	MaxDelay  int                `json:"max_delay_sec"`
+	Total     int                `json:"total"`
+	Sent      int                `json:"sent"`
+	Failed    int                `json:"failed"`
+	Skipped   int                `json:"skipped"`
+	Items     []*RecipientStatus `json:"items"`
+	auditID   int64
+	cancel    context.CancelFunc
+}
+
+func (j *BlastJob) snapshot() map[string]any {
+	j.mu.RLock()
+	defer j.mu.RUnlock()
+	return map[string]any{
+		"id":            j.ID,
+		"user_email":    j.UserEmail,
+		"user_name":     j.UserName,
+		"template":      j.Template,
+		"started_at":    j.StartedAt,
+		"ended_at":      j.EndedAt,
+		"running":       j.Running,
+		"min_delay_sec": j.MinDelay,
+		"max_delay_sec": j.MaxDelay,
+		"total":         j.Total,
+		"sent":          j.Sent,
+		"failed":        j.Failed,
+		"skipped":       j.Skipped,
+		"items":         j.Items,
+	}
+}
+
+func handleBlast(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", 405)
+		return
+	}
+	_, loggedIn, connected := state.snapshot()
+	if !loggedIn || !connected {
+		httpErr(w, 400, "WhatsApp belum terhubung. Scan QR dulu.")
+		return
+	}
+	if state.job != nil && state.job.Running {
+		httpErr(w, 409, "Ada blast yang sedang berjalan.")
+		return
+	}
+
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
+		httpErr(w, 400, "form: %v", err)
+		return
+	}
+	template := strings.TrimSpace(r.FormValue("template"))
+	if template == "" {
+		httpErr(w, 400, "template kosong")
+		return
+	}
+	minDelay := atoiOr(r.FormValue("min_delay"), 6)
+	maxDelay := atoiOr(r.FormValue("max_delay"), 14)
+	if minDelay < 2 {
+		minDelay = 2
+	}
+	if maxDelay < minDelay {
+		maxDelay = minDelay + 4
+	}
+
+	file, _, err := r.FormFile("csv")
+	if err != nil {
+		httpErr(w, 400, "csv: %v", err)
+		return
+	}
+	defer file.Close()
+
+	rows, err := parseCSV(file)
+	if err != nil {
+		httpErr(w, 400, "csv parse: %v", err)
+		return
+	}
+	if len(rows) == 0 {
+		httpErr(w, 400, "csv kosong")
+		return
+	}
+
+	user, _ := userFromCtx(r.Context())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	job := &BlastJob{
+		ID:        fmt.Sprintf("job-%d", time.Now().Unix()),
+		UserEmail: user.Email,
+		UserName:  user.Name,
+		Template:  template,
+		StartedAt: time.Now(),
+		Running:   true,
+		MinDelay:  minDelay,
+		MaxDelay:  maxDelay,
+		Total:     len(rows),
+		Items:     rows,
+		cancel:    cancel,
+	}
+	state.job = job
+
+	id, err := recordBlastStart(job)
+	if err != nil {
+		fmt.Println("audit start failed:", err)
+	}
+	job.auditID = id
+
+	go runBlast(ctx, job)
+
+	writeJSON(w, map[string]any{"ok": true, "job_id": job.ID, "total": len(rows)})
+}
+
+func handleProgress(w http.ResponseWriter, r *http.Request) {
+	if state.job == nil {
+		writeJSON(w, map[string]any{"job": nil})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"job": state.job.snapshot()})
+}
+
+func parseCSV(r io.Reader) ([]*RecipientStatus, error) {
+	rd := csv.NewReader(r)
+	rd.TrimLeadingSpace = true
+	rd.FieldsPerRecord = -1
+	header, err := rd.Read()
+	if err != nil {
+		return nil, fmt.Errorf("header: %w", err)
+	}
+	idx := map[string]int{}
+	for i, h := range header {
+		idx[strings.ToLower(strings.TrimSpace(h))] = i
+	}
+	pi, ok1 := idx["phone"]
+	ni, ok2 := idx["nama_outlet"]
+	ii, ok3 := idx["nomer_invoice"]
+	if !ok1 || !ok2 || !ok3 {
+		return nil, fmt.Errorf("header wajib: phone, nama_outlet, nomer_invoice")
+	}
+
+	var out []*RecipientStatus
+	for {
+		row, err := rd.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		phone := normalizePhone(row[pi])
+		if phone == "" {
+			continue
+		}
+		out = append(out, &RecipientStatus{
+			Phone:      phone,
+			NamaOutlet: safeAt(row, ni),
+			NomerInv:   safeAt(row, ii),
+			Status:     "pending",
+		})
+	}
+	return out, nil
+}
+
+func safeAt(row []string, i int) string {
+	if i < 0 || i >= len(row) {
+		return ""
+	}
+	return strings.TrimSpace(row[i])
+}
+
+// normalizePhone: keep digits, convert leading 0 -> 62 (Indonesia), strip leading +.
+func normalizePhone(raw string) string {
+	var b strings.Builder
+	for _, ch := range strings.TrimSpace(raw) {
+		if ch >= '0' && ch <= '9' {
+			b.WriteRune(ch)
+		}
+	}
+	s := b.String()
+	if s == "" {
+		return ""
+	}
+	if strings.HasPrefix(s, "0") {
+		s = "62" + s[1:]
+	}
+	return s
+}
+
+func renderTemplate(tpl string, r *RecipientStatus) string {
+	out := tpl
+	out = strings.ReplaceAll(out, "{{nama_outlet}}", r.NamaOutlet)
+	out = strings.ReplaceAll(out, "{{nomer_invoice}}", r.NomerInv)
+	return out
+}
+
+func runBlast(ctx context.Context, job *BlastJob) {
+	defer func() {
+		now := time.Now()
+		job.mu.Lock()
+		job.Running = false
+		job.EndedAt = &now
+		job.mu.Unlock()
+		if err := recordBlastEnd(job.auditID, job); err != nil {
+			fmt.Println("audit end failed:", err)
+		}
+	}()
+
+	for i, rec := range job.Items {
+		select {
+		case <-ctx.Done():
+			job.mu.Lock()
+			for _, it := range job.Items {
+				if it.Status == "pending" {
+					it.Status = "skipped"
+					it.Error = "cancelled"
+					job.Skipped++
+				}
+			}
+			job.mu.Unlock()
+			return
+		default:
+		}
+
+		msg := renderTemplate(job.Template, rec)
+		job.mu.Lock()
+		rec.Message = msg
+		job.mu.Unlock()
+
+		if err := sendOne(rec.Phone, msg); err != nil {
+			job.mu.Lock()
+			rec.Status = "failed"
+			rec.Error = err.Error()
+			job.Failed++
+			job.mu.Unlock()
+		} else {
+			job.mu.Lock()
+			rec.Status = "sent"
+			rec.SentAt = time.Now().Format(time.RFC3339)
+			job.Sent++
+			job.mu.Unlock()
+		}
+
+		if i < len(job.Items)-1 {
+			d := job.MinDelay + rand.Intn(job.MaxDelay-job.MinDelay+1)
+			select {
+			case <-ctx.Done():
+			case <-time.After(time.Duration(d) * time.Second):
+			}
+		}
+	}
+}
+
+func sendOne(phone, body string) error {
+	jid := types.NewJID(phone, types.DefaultUserServer)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	res, err := state.client.IsOnWhatsApp(ctx, []string{"+" + phone})
+	if err != nil {
+		return fmt.Errorf("check: %w", err)
+	}
+	if len(res) == 0 || !res[0].IsIn {
+		return fmt.Errorf("nomor tidak terdaftar di WhatsApp")
+	}
+
+	msg := &waProto.Message{Conversation: proto.String(body)}
+	_, err = state.client.SendMessage(ctx, jid, msg)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func atoiOr(s string, def int) int {
+	var n int
+	if _, err := fmt.Sscanf(strings.TrimSpace(s), "%d", &n); err != nil {
+		return def
+	}
+	return n
+}
+
+// suppress unused import warnings on some platforms
+var _ = whatsmeow.Client{}
