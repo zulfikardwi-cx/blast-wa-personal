@@ -47,6 +47,7 @@ func main() {
 	if err := initChat(); err != nil {
 		log.Fatalf("chat: %v", err)
 	}
+	startRetryScheduler()
 
 	rootCtx := context.Background()
 	dbLog := waLog.Stdout("Database", "WARN", true)
@@ -78,6 +79,10 @@ func main() {
 			log.Println("logged out — re-pair required")
 		case *events.Message:
 			handleIncomingWA(e)
+		case *events.UndecryptableMessage:
+			log.Printf("event.UndecryptableMessage: from=%s id=%s — decrypt failed, mungkin re-pair", e.Info.Sender.String(), e.Info.ID)
+		case *events.Receipt:
+			// receipt (delivered/read) — too noisy untuk di-log, skip
 		}
 	})
 
@@ -107,12 +112,15 @@ func main() {
 	mux.HandleFunc("/api/sheet-status", corsMiddleware(requireAuth(handleSheetStatus)))
 	mux.HandleFunc("/api/export-sheet", corsMiddleware(requireAuth(handleExportSheet)))
 
+	mux.HandleFunc("/api/templates", corsMiddleware(requireAuth(handleTemplates)))
+
 	// Inbox Chat endpoints
 	mux.HandleFunc("/api/inbox/threads", corsMiddleware(requireAuth(handleThreads)))
 	mux.HandleFunc("/api/inbox/messages", corsMiddleware(requireAuth(handleMessages)))
 	mux.HandleFunc("/api/inbox/read", corsMiddleware(requireAuth(handleMarkRead)))
 	mux.HandleFunc("/api/inbox/status", corsMiddleware(requireAuth(handleSetStatus)))
 	mux.HandleFunc("/api/inbox/reply", corsMiddleware(requireAuth(handleReply)))
+	mux.HandleFunc("/api/inbox/resolve", corsMiddleware(requireAuth(handleResolve)))
 
 	addr := os.Getenv("ADDR")
 	if addr == "" {
@@ -230,14 +238,28 @@ func httpErr(w http.ResponseWriter, status int, format string, args ...any) {
 // handleIncomingWA — di-call dari whatsmeow event handler. Simpan reply ke chat_messages
 // dan update thread. Skip group, skip outgoing, skip dari nomor yang tidak pernah di-blast.
 func handleIncomingWA(e *events.Message) {
+	// Debug log — semua event Message dilog untuk diagnose
+	log.Printf("event.Message: from=%s chat=%s alt=%s isFromMe=%v isGroup=%v id=%s",
+		e.Info.Sender.String(), e.Info.Chat.String(), e.Info.SenderAlt.String(), e.Info.IsFromMe, e.Info.IsGroup, e.Info.ID)
+
 	if e.Info.IsFromMe {
+		log.Println("  → skipped: from me")
 		return
 	}
 	if e.Info.IsGroup {
+		log.Println("  → skipped: group")
 		return
 	}
-	phone := e.Info.Sender.User
-	if phone == "" || !isPhoneBlasted(phone) {
+
+	// Resolve phone — handle LID (Linked Identity, sistem privacy WA terbaru)
+	phone := resolveSenderPhone(e.Info)
+	if phone == "" {
+		log.Printf("  → skipped: tidak bisa resolve phone dari sender=%s alt=%s",
+			e.Info.Sender.String(), e.Info.SenderAlt.String())
+		return
+	}
+	if !isPhoneBlasted(phone) {
+		log.Println("  → skipped: phone", phone, "tidak ada di chat_threads (belum pernah di-blast)")
 		return
 	}
 	body, mediaType := extractTextFromMessage(e.Message)
@@ -247,7 +269,7 @@ func handleIncomingWA(e *events.Message) {
 	if err := upsertThreadIncoming(phone, body, e.Info.Timestamp); err != nil {
 		log.Println("warn: upsertThreadIncoming:", err)
 	}
-	log.Println("inbox: incoming from", phone, "—", truncate(body, 40))
+	log.Println("  → inbox: incoming from", phone, "—", truncate(body, 40))
 }
 
 func serveLogin(w http.ResponseWriter, r *http.Request) {

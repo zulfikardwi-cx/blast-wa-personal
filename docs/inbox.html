@@ -10,16 +10,17 @@
     --bg:#0b1220; --panel:#121a2b; --panel2:#0f1626; --line:#223;
     --text:#e6ecff; --muted:#8b97b8;
     --teal:#2DBDB6; --lime:#9ACF87; --teal-soft:rgba(45,189,182,.15);
-    --warn:#f59e0b; --danger:#ef4444;
+    --warn:#f59e0b; --danger:#ef4444; --blue:#3b82f6;
     --bubble-in:#1f2937; --bubble-out:rgba(45,189,182,.2);
   }
   *{box-sizing:border-box}
   html,body{height:100%;margin:0}
   body{background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:flex;flex-direction:column;overflow:hidden}
+
   header{padding:12px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;background:var(--panel);flex-shrink:0}
-  header .logo{height:24px;width:auto;display:block}
+  header .logo{height:24px;width:auto}
   header .sep{width:1px;height:20px;background:var(--line)}
-  header h1{font-size:14px;margin:0;font-weight:500;color:var(--muted);letter-spacing:.3px}
+  header h1{font-size:14px;margin:0;font-weight:500;color:var(--muted)}
   header a.nav{color:var(--muted);text-decoration:none;font-size:13px;padding:4px 10px;border-radius:6px;border:1px solid var(--line)}
   header a.nav:hover{color:var(--teal);border-color:var(--teal)}
   header a.nav.active{color:var(--teal);border-color:var(--teal);background:var(--teal-soft)}
@@ -31,64 +32,100 @@
 
   main{flex:1;display:flex;overflow:hidden}
 
-  /* Sidebar */
-  aside{width:340px;border-right:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;flex-shrink:0}
-  .bucket-tabs{display:flex;padding:8px;gap:4px;border-bottom:1px solid var(--line)}
-  .bucket-tab{flex:1;padding:6px 8px;background:var(--panel2);color:var(--muted);border:1px solid var(--line);border-radius:6px;font-size:11px;cursor:pointer;text-align:center;font-weight:500;text-transform:uppercase;letter-spacing:.3px}
-  .bucket-tab.active{background:var(--teal-soft);color:var(--teal);border-color:var(--teal)}
-  .bucket-tab .count{display:inline-block;background:var(--line);color:var(--muted);padding:1px 5px;border-radius:6px;margin-left:4px;font-size:10px}
-  .bucket-tab.active .count{background:var(--teal);color:#0b1220}
+  /* ===== COL 1 — BUCKET NAV ===== */
+  .col-bucket{width:230px;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;flex-shrink:0;padding:16px 12px}
+  .col-bucket .acc-card{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:16px}
+  .col-bucket .acc-card .title{font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px}
+  .col-bucket .acc-card .icon-circle{width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,var(--teal),var(--lime));display:flex;align-items:center;justify-content:center;color:#0b1220;font-weight:700;font-size:14px}
+  .col-bucket .acc-card .sub{font-size:11px;color:var(--muted);margin-top:2px}
+  .col-bucket .acc-card .status{font-size:11px;margin-top:8px;padding:4px 8px;background:rgba(154,207,135,.15);color:var(--lime);border-radius:6px;display:inline-flex;align-items:center;gap:4px}
+  .col-bucket .acc-card .status::before{content:"●"}
+
+  .col-bucket .label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin:8px 0 6px;padding-left:8px}
+  .bucket-btn{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;cursor:pointer;border:0;background:transparent;color:var(--text);font-size:13px;text-align:left;width:100%;margin-bottom:2px;transition:background .12s}
+  .bucket-btn:hover{background:var(--panel2)}
+  .bucket-btn.active{background:var(--panel2);border:1px solid var(--line)}
+  .bucket-btn .dot{width:8px;height:8px;border-radius:50%}
+  .bucket-btn .name{flex:1;font-weight:500}
+  .bucket-btn .count{font-size:11px;background:var(--line);color:var(--muted);padding:2px 8px;border-radius:10px;min-width:24px;text-align:center}
+  .bucket-btn.active .count{background:var(--teal);color:#0b1220;font-weight:600}
+  .dot.after_blast{background:var(--blue)}
+  .dot.open{background:var(--lime)}
+  .dot.in_progress{background:var(--warn)}
+  .dot.done{background:var(--muted)}
+
+  .user-card{margin-top:auto;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px;font-size:11px;color:var(--muted)}
+  .user-card b{color:var(--text);display:block;font-size:12px;font-weight:600}
+  .user-card a.signout{color:var(--teal);font-size:11px;text-decoration:none;float:right}
+
+  /* ===== COL 2 — THREAD LIST ===== */
+  .col-list{width:360px;background:var(--panel2);border-right:1px solid var(--line);display:flex;flex-direction:column;flex-shrink:0}
+  .list-header{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px}
+  .list-header h2{margin:0;font-size:15px;font-weight:600}
+  .list-header .badge{background:var(--line);color:var(--muted);padding:1px 8px;border-radius:10px;font-size:11px;font-weight:500}
+  .list-header .badge.hl{background:var(--teal);color:#0b1220}
+  .list-header .sort{margin-left:auto;font-size:11px;color:var(--muted)}
+
+  .search-box{padding:10px 14px;border-bottom:1px solid var(--line)}
+  .search-box input{width:100%;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 12px;font-size:12px}
+  .search-box input:focus{outline:none;border-color:var(--teal)}
+
   .thread-list{flex:1;overflow-y:auto}
-  .thread-item{padding:12px 16px;border-bottom:1px solid var(--line);cursor:pointer;display:flex;flex-direction:column;gap:4px;position:relative}
-  .thread-item:hover{background:var(--panel2)}
-  .thread-item.selected{background:var(--teal-soft);border-left:3px solid var(--teal);padding-left:13px}
-  .thread-item .name{font-weight:600;font-size:13px;color:var(--text);display:flex;align-items:center;gap:6px}
-  .thread-item .phone{color:var(--muted);font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-  .thread-item .preview{color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:280px}
-  .thread-item .preview.in::before{content:"";color:var(--lime);margin-right:4px;font-weight:600}
-  .thread-item .preview.out::before{content:"";color:var(--muted);margin-right:4px}
-  .thread-item .time{color:var(--muted);font-size:10px;position:absolute;top:10px;right:14px}
-  .thread-item .unread-badge{background:var(--lime);color:#0b1220;font-size:10px;font-weight:600;padding:1px 6px;border-radius:8px;margin-left:auto}
-  .thread-item .status-dot{width:8px;height:8px;border-radius:50%;display:inline-block}
-  .status-dot.open{background:var(--lime)}
-  .status-dot.in_progress{background:var(--warn)}
-  .status-dot.done{background:var(--muted)}
-  .empty{padding:40px 20px;text-align:center;color:var(--muted);font-size:13px}
+  .thread-item{padding:14px 18px;border-bottom:1px solid var(--line);cursor:pointer;display:flex;gap:12px;position:relative;transition:background .12s}
+  .thread-item:hover{background:var(--panel)}
+  .thread-item.selected{background:var(--panel);box-shadow:inset 3px 0 0 var(--teal)}
+  .thread-item .avatar{width:36px;height:36px;border-radius:50%;background:var(--line);display:flex;align-items:center;justify-content:center;color:var(--text);font-weight:600;font-size:13px;flex-shrink:0}
+  .thread-item .body{flex:1;min-width:0}
+  .thread-item .top{display:flex;align-items:center;gap:8px;margin-bottom:2px}
+  .thread-item .name{font-weight:600;font-size:13px;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .thread-item .time{font-size:10px;color:var(--muted);flex-shrink:0}
+  .thread-item .phone{color:var(--muted);font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;margin-bottom:4px}
+  .thread-item .preview{color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .thread-item .status-tag{display:inline-block;font-size:9px;padding:1px 7px;border-radius:8px;text-transform:uppercase;letter-spacing:.4px;margin-top:6px;font-weight:600}
+  .status-tag.after_blast{background:rgba(59,130,246,.2);color:var(--blue)}
+  .status-tag.open{background:rgba(154,207,135,.2);color:var(--lime)}
+  .status-tag.in_progress{background:rgba(245,158,11,.2);color:var(--warn)}
+  .status-tag.done{background:rgba(139,151,184,.2);color:var(--muted)}
+  .thread-item .unread{background:var(--lime);color:#0b1220;font-size:10px;font-weight:600;padding:1px 6px;border-radius:8px;position:absolute;top:14px;right:18px}
+  .empty{padding:60px 20px;text-align:center;color:var(--muted);font-size:13px}
 
-  /* Right pane */
-  section.chat{flex:1;display:flex;flex-direction:column;background:var(--panel2);overflow:hidden}
-  .chat-header{padding:12px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;background:var(--panel);flex-shrink:0}
-  .chat-header .info{flex:1}
-  .chat-header .info .h-name{font-weight:600}
-  .chat-header .info .h-phone{color:var(--muted);font-size:12px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-  .chat-header .actions{display:flex;gap:6px}
-  .chat-header button{font-size:12px;padding:6px 12px;border-radius:6px;cursor:pointer;border:1px solid var(--line);background:transparent;color:var(--text)}
-  .chat-header button.active{background:var(--teal);color:#0b1220;border-color:var(--teal);font-weight:600}
-  .chat-header button:hover:not(.active){background:var(--panel2)}
-  .chat-header button.warn-action{color:var(--warn);border-color:var(--warn)}
-  .chat-header button.warn-action.active{background:var(--warn);color:#0b1220}
-  .chat-header button.done-action{color:var(--muted)}
-  .chat-header button.done-action.active{background:var(--muted);color:#0b1220}
+  /* ===== COL 3 — CHAT DETAIL ===== */
+  .col-chat{flex:1;display:flex;flex-direction:column;background:var(--bg);overflow:hidden;min-width:0}
+  .chat-header{padding:14px 24px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;background:var(--panel);flex-shrink:0}
+  .chat-header .avatar{width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,var(--teal),var(--lime));display:flex;align-items:center;justify-content:center;color:#0b1220;font-weight:600}
+  .chat-header .info{flex:1;min-width:0}
+  .chat-header .h-name{font-weight:600;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .chat-header .h-phone{color:var(--muted);font-size:12px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .chat-header .h-assign{color:var(--warn);font-size:11px;margin-top:2px}
+  .chat-header .actions{display:flex;gap:8px;flex-shrink:0}
+  .chat-header button{font-size:12px;padding:8px 14px;border-radius:8px;cursor:pointer;border:1px solid var(--line);background:transparent;color:var(--text);font-weight:500;transition:all .12s}
+  .chat-header button.done-btn{background:var(--lime);color:#0b1220;border-color:var(--lime);font-weight:600}
+  .chat-header button.done-btn:hover{filter:brightness(1.1)}
+  .chat-header button.reopen-btn{border-color:var(--blue);color:var(--blue)}
+  .chat-header button.reopen-btn:hover{background:var(--blue);color:#fff}
+  .chat-header button:hover:not(.done-btn):not(.reopen-btn){background:var(--panel2)}
 
-  .messages{flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:8px}
-  .day-sep{text-align:center;color:var(--muted);font-size:11px;margin:12px 0;text-transform:uppercase}
-  .msg{max-width:60%;padding:8px 12px;border-radius:10px;position:relative;word-wrap:break-word;line-height:1.4;font-size:13px}
-  .msg .meta{font-size:10px;color:var(--muted);margin-top:4px;display:flex;gap:8px;align-items:center}
+  .messages{flex:1;overflow-y:auto;padding:24px;display:flex;flex-direction:column;gap:6px;background-image:radial-gradient(circle at 1px 1px,rgba(255,255,255,.02) 1px,transparent 0);background-size:20px 20px}
+  .day-sep{text-align:center;color:var(--muted);font-size:11px;margin:16px 0 8px;text-transform:uppercase;letter-spacing:1px}
+  .msg{max-width:55%;padding:8px 12px;border-radius:10px;word-wrap:break-word;line-height:1.4;font-size:13px;white-space:pre-wrap}
+  .msg .meta{font-size:10px;color:var(--muted);margin-top:4px;display:flex;gap:6px}
   .msg.in{background:var(--bubble-in);align-self:flex-start;border-bottom-left-radius:2px}
-  .msg.out{background:var(--bubble-out);color:var(--text);align-self:flex-end;border-bottom-right-radius:2px}
+  .msg.out{background:var(--bubble-out);align-self:flex-end;border-bottom-right-radius:2px}
+  .msg.system{background:transparent;align-self:center;color:var(--muted);font-size:11px;font-style:italic;max-width:80%;text-align:center;padding:4px 12px;border:1px dashed var(--line);border-radius:6px;margin:8px 0}
   .msg .media{color:var(--warn);font-style:italic}
-  .msg.system{background:transparent;align-self:center;color:var(--muted);font-size:11px;font-style:italic}
 
-  .reply-box{padding:12px 16px;border-top:1px solid var(--line);background:var(--panel);flex-shrink:0;display:flex;gap:10px;align-items:flex-end}
-  .reply-box textarea{flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px;font:13px/1.4 inherit;resize:none;min-height:38px;max-height:120px}
+  .reply-box{padding:14px 20px;border-top:1px solid var(--line);background:var(--panel);flex-shrink:0;display:flex;gap:10px;align-items:flex-end}
+  .reply-box textarea{flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:10px;padding:10px 14px;font:13px/1.4 inherit;resize:none;min-height:40px;max-height:120px}
   .reply-box textarea:focus{outline:none;border-color:var(--teal)}
-  .reply-box button{background:var(--teal);color:#0b1220;border:0;padding:10px 18px;border-radius:8px;cursor:pointer;font-weight:600;height:38px}
+  .reply-box button{background:var(--teal);color:#0b1220;border:0;padding:10px 22px;border-radius:10px;cursor:pointer;font-weight:600;height:40px}
   .reply-box button:disabled{opacity:.5;cursor:not-allowed}
+  .reply-box.locked{opacity:.5;pointer-events:none}
+  .reply-box.locked textarea{cursor:not-allowed}
 
   .no-thread{flex:1;display:flex;align-items:center;justify-content:center;color:var(--muted);text-align:center;padding:40px;flex-direction:column;gap:8px}
-  .no-thread img{width:120px;opacity:.3}
-
+  .no-thread .icon{font-size:64px;opacity:.4}
   .global-err{background:#7f1d1d;color:#fecaca;padding:8px 20px;font-size:12px;text-align:center}
+  .toast{position:fixed;bottom:20px;right:20px;background:var(--panel);border:1px solid var(--lime);color:var(--lime);padding:10px 16px;border-radius:8px;font-size:13px;display:none;z-index:100}
 </style>
 </head>
 <body>
@@ -104,86 +141,135 @@
     <img id="userAvatar" src="" alt="" />
     <span id="userName">—</span>
   </div>
-  <button class="nav" id="signoutBtn" style="background:transparent;border:1px solid var(--line);cursor:pointer">Sign out</button>
 </header>
 
 <main>
-  <aside>
-    <div class="bucket-tabs">
-      <button class="bucket-tab active" data-bucket="open">Open <span class="count" id="cOpen">0</span></button>
-      <button class="bucket-tab" data-bucket="in_progress">In Progress <span class="count" id="cProg">0</span></button>
-      <button class="bucket-tab" data-bucket="done">Done <span class="count" id="cDone">0</span></button>
-      <button class="bucket-tab" data-bucket="all">All</button>
+  <!-- COL 1 — BUCKETS -->
+  <div class="col-bucket">
+    <div class="acc-card">
+      <div class="title">
+        <div class="icon-circle">📥</div>
+        <div>
+          Inbox<br/>
+          <span class="sub">majoo Blast WA</span>
+        </div>
+      </div>
+      <div class="status" id="waStatusBadge">WA Connected</div>
+    </div>
+
+    <div class="label">Bucket</div>
+    <button class="bucket-btn active" data-bucket="after_blast">
+      <span class="dot after_blast"></span>
+      <span class="name">After Blast</span>
+      <span class="count" id="cAfterBlast">0</span>
+    </button>
+    <button class="bucket-btn" data-bucket="open">
+      <span class="dot open"></span>
+      <span class="name">Open</span>
+      <span class="count" id="cOpen">0</span>
+    </button>
+    <button class="bucket-btn" data-bucket="in_progress">
+      <span class="dot in_progress"></span>
+      <span class="name">In Progress</span>
+      <span class="count" id="cProg">0</span>
+    </button>
+    <button class="bucket-btn" data-bucket="done">
+      <span class="dot done"></span>
+      <span class="name">Done</span>
+      <span class="count" id="cDone">0</span>
+    </button>
+
+    <div class="user-card">
+      <div><b id="userCardName">—</b></div>
+      <span id="userCardEmail">—</span>
+      <a href="#" class="signout" id="signoutBtn">Keluar</a>
+    </div>
+  </div>
+
+  <!-- COL 2 — THREAD LIST -->
+  <div class="col-list">
+    <div class="list-header">
+      <h2 id="listTitle">After Blast</h2>
+      <span class="badge hl" id="listCount">0</span>
+      <span class="sort">↓ Terbaru</span>
+    </div>
+    <div class="search-box">
+      <input type="text" id="searchInput" placeholder="Cari outlet, nomor, atau isi chat..." />
     </div>
     <div class="thread-list" id="threadList">
-      <div class="empty">Memuat thread...</div>
+      <div class="empty">Memuat...</div>
     </div>
-  </aside>
+  </div>
 
-  <section class="chat">
+  <!-- COL 3 — CHAT DETAIL -->
+  <div class="col-chat">
     <div id="chatEmpty" class="no-thread">
-      <div style="font-size:48px">💬</div>
+      <div class="icon">💬</div>
       <div>Pilih thread di kiri untuk lihat percakapan</div>
       <div style="font-size:11px">Hanya nomor yang sudah di-blast yang muncul.<br />Reply akan masuk otomatis ke sini.</div>
     </div>
 
     <div id="chatContent" style="display:none;flex-direction:column;flex:1;overflow:hidden">
       <div class="chat-header">
+        <div class="avatar" id="hAvatar">--</div>
         <div class="info">
           <div class="h-name" id="hName">—</div>
           <div class="h-phone" id="hPhone">—</div>
+          <div class="h-assign" id="hAssign" style="display:none"></div>
         </div>
         <div class="actions">
-          <button id="actOpen" data-s="open">Open</button>
-          <button id="actProg" class="warn-action" data-s="in_progress">In Progress</button>
-          <button id="actDone" class="done-action" data-s="done">Done</button>
+          <button class="reopen-btn" id="actReopen" style="display:none">↺ Reopen</button>
+          <button class="done-btn" id="actDone">✓ Done / Resolved</button>
         </div>
       </div>
 
       <div class="messages" id="messages"></div>
 
-      <div class="reply-box">
+      <div class="reply-box" id="replyBox">
         <textarea id="replyText" placeholder="Tulis balasan..." rows="1"></textarea>
         <button id="sendBtn">Kirim</button>
       </div>
     </div>
-  </section>
+  </div>
 </main>
+
+<div class="toast" id="toast"></div>
 
 <script>
 const API_BASE = (window.APP_CONFIG && window.APP_CONFIG.API_BASE) || '';
 let me = null;
 let currentPhone = null;
-let currentBucket = 'open';
+let currentBucket = 'after_blast';
 let lastMessageID = 0;
+let allThreads = [];
+let searchTerm = '';
 
 const $ = s => document.querySelector(s);
 const $$ = s => document.querySelectorAll(s);
 const esc = s => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const initials = name => (name||'').split(/\s+/).slice(0,2).map(w=>w[0]||'').join('').toUpperCase() || '?';
 
 function apiFetch(path, opts = {}) {
   return fetch(API_BASE + path, { credentials: 'include', ...opts });
 }
 
-function showApiErr(msg) {
-  const b = $('#apiErrBanner');
-  b.textContent = msg;
-  b.style.display = 'block';
-}
+function showApiErr(msg) { $('#apiErrBanner').textContent = msg; $('#apiErrBanner').style.display = 'block'; }
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 2500); }
+
+const bucketLabels = { after_blast:'After Blast', open:'Open', in_progress:'In Progress', done:'Done' };
 
 async function loadMe() {
-  if (!API_BASE) { showApiErr('API_BASE belum diset di config.js'); return; }
   try {
     const r = await apiFetch('/api/me').then(r => r.json());
     me = r.user;
     if (!me) { location.href = 'login.html'; return; }
     $('#userName').textContent = me.name || me.email;
+    $('#userCardName').textContent = me.name || '(no name)';
+    $('#userCardEmail').textContent = me.email;
     if (me.picture) $('#userAvatar').src = me.picture;
     else $('#userAvatar').style.display = 'none';
     $('#userBox').style.visibility = 'visible';
-  } catch (e) {
-    showApiErr('Tidak bisa konek ke backend (' + API_BASE + ')');
-  }
+  } catch (e) { showApiErr('Tidak bisa konek ke backend'); }
 }
 
 async function pollStatus() {
@@ -192,12 +278,13 @@ async function pollStatus() {
     if (r.status === 401) { location.href = 'login.html'; return; }
     const d = await r.json();
     const pill = $('#connStatus');
+    const badge = $('#waStatusBadge');
     if (d.loggedIn && d.connected) {
-      pill.textContent = 'WA Connected';
-      pill.className = 'status-pill ok';
+      pill.textContent = 'WA Connected'; pill.className = 'status-pill ok';
+      badge.textContent = 'WA Connected'; badge.style.background = 'rgba(154,207,135,.15)'; badge.style.color = 'var(--lime)';
     } else {
-      pill.textContent = d.hasQR ? 'Scan QR' : 'Disconnected';
-      pill.className = 'status-pill warn';
+      pill.textContent = d.hasQR ? 'Scan QR' : 'Disconnected'; pill.className = 'status-pill warn';
+      badge.textContent = 'WA Disconnected'; badge.style.background = '#78350f'; badge.style.color = '#fde68a';
     }
   } catch (e) {}
 }
@@ -205,45 +292,60 @@ async function pollStatus() {
 async function loadThreads() {
   try {
     const r = await apiFetch(`/api/inbox/threads?status=${currentBucket}`).then(r => r.json());
+    $('#cAfterBlast').textContent = r.counts.after_blast || 0;
     $('#cOpen').textContent = r.counts.open || 0;
     $('#cProg').textContent = r.counts.in_progress || 0;
     $('#cDone').textContent = r.counts.done || 0;
-    // Nav badge for total unread
+
     const unread = r.counts.unread || 0;
     const navUnread = $('#navUnread');
-    if (unread > 0) {
-      navUnread.style.display = 'inline-block';
-      navUnread.textContent = unread;
-    } else {
-      navUnread.style.display = 'none';
-    }
+    if (unread > 0) { navUnread.style.display = 'inline-block'; navUnread.textContent = unread; }
+    else navUnread.style.display = 'none';
 
-    const list = $('#threadList');
-    list.innerHTML = '';
-    if (!r.threads || !r.threads.length) {
-      list.innerHTML = '<div class="empty">Tidak ada thread di bucket ini.<br /><small>Blast dulu lewat halaman Blast.</small></div>';
-      return;
-    }
-    r.threads.forEach(t => {
-      const div = document.createElement('div');
-      div.className = 'thread-item';
-      if (t.phone === currentPhone) div.classList.add('selected');
-      const time = t.last_message_at ? new Date(t.last_message_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : '';
-      const dirClass = t.last_direction === 'in' ? 'in' : 'out';
-      const namaDisplay = t.nama_outlet || t.phone;
-      div.innerHTML = `
-        <div class="name">
-          <span class="status-dot ${t.status}"></span>
-          ${esc(namaDisplay)}
-          ${t.unread_count > 0 ? '<span class="unread-badge">'+t.unread_count+'</span>' : ''}
-        </div>
-        <div class="phone">+${esc(t.phone)}${t.assigned_name ? ' · '+esc(t.assigned_name) : ''}</div>
-        <div class="preview ${dirClass}">${esc(t.last_preview || '(kosong)')}</div>
-        <div class="time">${time}</div>`;
-      div.addEventListener('click', () => selectThread(t.phone));
-      list.appendChild(div);
-    });
+    allThreads = r.threads || [];
+    $('#listTitle').textContent = bucketLabels[currentBucket] || 'All';
+    $('#listCount').textContent = allThreads.length;
+    renderThreadList();
   } catch (e) { console.error(e); }
+}
+
+function renderThreadList() {
+  const list = $('#threadList');
+  list.innerHTML = '';
+  const filtered = searchTerm
+    ? allThreads.filter(t => {
+        const s = searchTerm.toLowerCase();
+        return (t.nama_outlet||'').toLowerCase().includes(s)
+          || t.phone.includes(s)
+          || (t.last_preview||'').toLowerCase().includes(s);
+      })
+    : allThreads;
+  if (!filtered.length) {
+    list.innerHTML = '<div class="empty">Tidak ada thread di bucket ini.<br/><small>Blast dulu lewat halaman Blast.</small></div>';
+    return;
+  }
+  filtered.forEach(t => {
+    const div = document.createElement('div');
+    div.className = 'thread-item';
+    if (t.phone === currentPhone) div.classList.add('selected');
+    const time = t.last_message_at ? new Date(t.last_message_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : '';
+    const namaDisplay = t.nama_outlet || t.phone;
+    const previewPrefix = t.last_direction === 'in' ? '' : 'Anda: ';
+    div.innerHTML = `
+      <div class="avatar">${esc(initials(namaDisplay))}</div>
+      <div class="body">
+        <div class="top">
+          <span class="name">${esc(namaDisplay)}</span>
+          <span class="time">${time}</span>
+        </div>
+        <div class="phone">+${esc(t.phone)}</div>
+        <div class="preview">${esc(previewPrefix + (t.last_preview || ''))}</div>
+        <span class="status-tag ${t.status}">${esc(bucketLabels[t.status]||t.status)}</span>
+      </div>
+      ${t.unread_count > 0 ? '<span class="unread">'+t.unread_count+'</span>' : ''}`;
+    div.addEventListener('click', () => selectThread(t.phone));
+    list.appendChild(div);
+  });
 }
 
 async function selectThread(phone) {
@@ -253,35 +355,45 @@ async function selectThread(phone) {
   $('#chatEmpty').style.display = 'none';
   $('#chatContent').style.display = 'flex';
   await loadMessages(true);
-  // mark as read
   await apiFetch(`/api/inbox/read?phone=${encodeURIComponent(phone)}`, { method: 'POST' });
-  loadThreads(); // refresh sidebar to update unread badge
+  loadThreads();
 }
 
 async function loadMessages(scrollBottom) {
   if (!currentPhone) return;
   try {
     const r = await apiFetch(`/api/inbox/messages?phone=${encodeURIComponent(currentPhone)}`).then(r => r.json());
-    $('#hName').textContent = r.nama_outlet || '(no outlet name)';
-    $('#hPhone').textContent = '+' + currentPhone + (r.assigned_name ? ' · Assigned: ' + r.assigned_name : '');
+    const nama = r.nama_outlet || '(no outlet)';
+    $('#hName').textContent = nama;
+    $('#hPhone').textContent = '+' + currentPhone;
+    $('#hAvatar').textContent = initials(nama);
+    if (r.assigned_name) {
+      $('#hAssign').textContent = 'PIC: ' + r.assigned_name;
+      $('#hAssign').style.display = '';
+    } else {
+      $('#hAssign').style.display = 'none';
+    }
 
-    // Update status buttons
-    ['Open','Prog','Done'].forEach(b => {
-      const id = '#act' + b;
-      $(id).classList.remove('active');
-    });
-    if (r.status === 'open') $('#actOpen').classList.add('active');
-    if (r.status === 'in_progress') $('#actProg').classList.add('active');
-    if (r.status === 'done') $('#actDone').classList.add('active');
+    // Done button visibility & reply lock
+    const replyBox = $('#replyBox');
+    if (r.status === 'done') {
+      $('#actDone').style.display = 'none';
+      $('#actReopen').style.display = '';
+      replyBox.classList.add('locked');
+      $('#replyText').placeholder = 'Thread sudah Done. Blast ulang untuk reopen.';
+    } else {
+      $('#actDone').style.display = '';
+      $('#actReopen').style.display = 'none';
+      replyBox.classList.remove('locked');
+      $('#replyText').placeholder = 'Tulis balasan...';
+    }
 
-    const list = $('#messages');
     const msgs = r.messages || [];
-
-    // optimization: only re-render if new messages
     const newMaxID = msgs.length ? msgs[msgs.length-1].id : 0;
-    if (newMaxID === lastMessageID && list.children.length > 0) return;
+    if (newMaxID === lastMessageID && $('#messages').children.length > 0) return;
     lastMessageID = newMaxID;
 
+    const list = $('#messages');
     list.innerHTML = '';
     let lastDate = '';
     msgs.forEach(m => {
@@ -298,34 +410,50 @@ async function loadMessages(scrollBottom) {
       div.className = 'msg ' + m.direction;
       const timeStr = d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
       const sender = m.direction === 'out' && m.sender_name ? esc(m.sender_name) : (m.direction === 'in' ? 'User' : 'Blast');
-      div.innerHTML = `
-        ${m.is_media ? '<div class="media">'+esc(m.body)+'</div>' : esc(m.body).replace(/\n/g,'<br>')}
-        <div class="meta">${sender} · ${timeStr}</div>`;
+      const bodyHtml = m.is_media ? '<span class="media">'+esc(m.body)+'</span>' : esc(m.body);
+      div.innerHTML = bodyHtml + `<div class="meta">${sender} · ${timeStr}</div>`;
       list.appendChild(div);
     });
     if (scrollBottom) list.scrollTop = list.scrollHeight;
   } catch (e) { console.error(e); }
 }
 
-// status buttons
-['Open','Prog','Done'].forEach(b => {
-  $('#act' + b).addEventListener('click', async (ev) => {
-    if (!currentPhone) return;
-    const status = ev.target.dataset.s;
-    const fd = new FormData();
-    fd.append('status', status);
-    await apiFetch(`/api/inbox/status?phone=${encodeURIComponent(currentPhone)}`, { method: 'POST', body: fd });
-    loadMessages(false);
+// Done = resolve (send closing + lock)
+$('#actDone').addEventListener('click', async () => {
+  if (!currentPhone) return;
+  if (!confirm('Tandai thread ini sebagai Done?\n\nClosing message akan otomatis terkirim ke user, dan thread akan dikunci (reply user setelah ini tidak ubah status).')) return;
+  $('#actDone').disabled = true;
+  $('#actDone').textContent = 'Mengirim...';
+  try {
+    const r = await apiFetch(`/api/inbox/resolve?phone=${encodeURIComponent(currentPhone)}`, { method: 'POST' });
+    if (!r.ok) { alert('Gagal: ' + await r.text()); return; }
+    toast('✅ Thread di-Done. Closing message terkirim.');
+    await loadMessages(true);
     loadThreads();
-  });
+  } finally {
+    $('#actDone').disabled = false;
+    $('#actDone').textContent = '✓ Done / Resolved';
+  }
 });
 
-// reply
+// Reopen — manual escape Done
+$('#actReopen').addEventListener('click', async () => {
+  if (!currentPhone) return;
+  if (!confirm('Reopen thread? Status akan kembali ke Open.\nReply user berikutnya akan tertangkap normal lagi.')) return;
+  const fd = new FormData();
+  fd.append('status', 'open');
+  await apiFetch(`/api/inbox/status?phone=${encodeURIComponent(currentPhone)}`, { method: 'POST', body: fd });
+  toast('↺ Thread di-reopen ke Open.');
+  await loadMessages(false);
+  loadThreads();
+});
+
+// Reply
 $('#sendBtn').addEventListener('click', sendReply);
-$('#replyText').addEventListener('keydown', (e) => {
+$('#replyText').addEventListener('keydown', e => {
   if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); sendReply(); }
 });
-$('#replyText').addEventListener('input', (e) => {
+$('#replyText').addEventListener('input', e => {
   e.target.style.height = 'auto';
   e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
 });
@@ -339,38 +467,37 @@ async function sendReply() {
   fd.append('body', text);
   try {
     const r = await apiFetch(`/api/inbox/reply?phone=${encodeURIComponent(currentPhone)}`, { method: 'POST', body: fd });
-    if (!r.ok) {
-      alert('Gagal kirim: ' + await r.text());
-      return;
-    }
-    $('#replyText').value = '';
-    $('#replyText').style.height = 'auto';
+    if (!r.ok) { alert('Gagal: ' + await r.text()); return; }
+    $('#replyText').value = ''; $('#replyText').style.height = 'auto';
     await loadMessages(true);
     loadThreads();
-  } catch (e) {
-    alert('Error: ' + e.message);
   } finally {
     $('#sendBtn').disabled = false;
     $('#sendBtn').textContent = 'Kirim';
   }
 }
 
-// bucket tabs
-$$('.bucket-tab').forEach(b => {
-  b.addEventListener('click', () => {
-    $$('.bucket-tab').forEach(x => x.classList.remove('active'));
-    b.classList.add('active');
-    currentBucket = b.dataset.bucket;
-    loadThreads();
-  });
+// Bucket tabs
+$$('.bucket-btn').forEach(b => b.addEventListener('click', () => {
+  $$('.bucket-btn').forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+  currentBucket = b.dataset.bucket;
+  loadThreads();
+}));
+
+// Search
+$('#searchInput').addEventListener('input', e => {
+  searchTerm = e.target.value.trim();
+  renderThreadList();
 });
 
-$('#signoutBtn').addEventListener('click', async () => {
-  await apiFetch('/auth/logout', { method:'POST' });
+$('#signoutBtn').addEventListener('click', async e => {
+  e.preventDefault();
+  await apiFetch('/auth/logout', { method: 'POST' });
   location.href = 'login.html';
 });
 
-// init
+// Init
 loadMe().then(() => {
   if (!me) return;
   pollStatus(); setInterval(pollStatus, 3000);

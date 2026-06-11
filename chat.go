@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -15,6 +16,8 @@ import (
 )
 
 func initChat() error {
+	loadClosingTemplate()
+	loadAttemptTemplates()
 	_, err := auditDB.Exec(`
 CREATE TABLE IF NOT EXISTS chat_threads (
 	phone TEXT PRIMARY KEY,
@@ -33,6 +36,9 @@ CREATE TABLE IF NOT EXISTS chat_threads (
 CREATE INDEX IF NOT EXISTS idx_threads_updated ON chat_threads(updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_threads_status ON chat_threads(status);
 
+-- Kolom retry tracking — di-tambahkan via ALTER IF EXISTS check di Go
+-- (SQLite tidak support ADD COLUMN IF NOT EXISTS sebelum versi 3.35)
+
 CREATE TABLE IF NOT EXISTS chat_messages (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	phone TEXT NOT NULL,
@@ -50,7 +56,125 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 CREATE INDEX IF NOT EXISTS idx_messages_phone ON chat_messages(phone, id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_wa_id ON chat_messages(wa_message_id) WHERE wa_message_id IS NOT NULL;
 `)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Migration: tambah kolom retry tracking ke chat_threads kalau belum ada
+	addColumns := []struct {
+		col, def string
+	}{
+		{"nomer_invoice", "TEXT"},
+		{"current_attempt", "INTEGER NOT NULL DEFAULT 1"},
+		{"last_attempt_at", "TEXT"},
+	}
+	for _, c := range addColumns {
+		_, e := auditDB.Exec(fmt.Sprintf("ALTER TABLE chat_threads ADD COLUMN %s %s", c.col, c.def))
+		// abaikan error "duplicate column name" — kolom sudah ada
+		if e != nil && !strings.Contains(e.Error(), "duplicate column") {
+			return e
+		}
+	}
+	return nil
+}
+
+// ---- 3 template attempts (sesuai spec user) ----
+// Override via env: TEMPLATE_ATTEMPT_1 / TEMPLATE_ATTEMPT_2 / TEMPLATE_ATTEMPT_3
+// Pakai \n untuk newline kalau di-set via env.
+
+var attemptTemplates [3]string
+
+func loadAttemptTemplates() {
+	attemptTemplates[0] = pickTemplate("TEMPLATE_ATTEMPT_1", `Halo, Majoopreneurs!
+
+Terima kasih telah berlangganan aplikasi majoo.
+Untuk menjaga keakuratan dan keamanan data, kami perlu melakukan validasi untuk Invoice berikut:
+
+Nama Outlet: {{nama_outlet}}
+No. Invoice: {{nomer_invoice}}
+
+Mohon balas pesan ini dengan agar proses validasi bisa segera kami jadwalkan.
+Tim Validator kami akan menghubungi Kakak untuk melakukan sesi Google Meet atau WhatsApp Call.
+
+Terima kasih! 🙏`)
+
+	attemptTemplates[1] = pickTemplate("TEMPLATE_ATTEMPT_2", `Halo, Majoopreneurs!
+
+Mohon maaf, ingin melakukan konfirmasi kembali
+Untuk menjaga keakuratan dan keamanan data, kami perlu melakukan validasi untuk Invoice berikut:
+
+Nama Outlet: {{nama_outlet}}
+No. Invoice: {{nomer_invoice}}
+
+Mohon balas pesan ini dengan agar proses validasi bisa segera kami jadwalkan.
+Tim Validator kami akan menghubungi Kakak untuk melakukan sesi Google Meet atau WhatsApp Call.
+
+Terima kasih! 🙏`)
+
+	attemptTemplates[2] = pickTemplate("TEMPLATE_ATTEMPT_3", `Halo, Majoopreneurs!
+
+Izin follow up kembali
+Untuk menjaga keakuratan dan keamanan data, kami perlu melakukan validasi untuk Invoice berikut:
+
+Nama Outlet: {{nama_outlet}}
+No. Invoice: {{nomer_invoice}}
+
+Mohon balas pesan ini dengan agar proses validasi bisa segera kami jadwalkan.
+Tim Validator kami akan menghubungi Kakak untuk melakukan sesi Google Meet atau WhatsApp Call.
+Jika Kakak masih belum membalas pesan ini, maka penjadwalan kami tutup. Jika terdapat permintaan dan informasi lainnya, silahkan menghubungi Hotline Majoo pada nomer 0811-500-460
+
+Terima kasih! 🙏`)
+}
+
+func pickTemplate(envKey, def string) string {
+	t := os.Getenv(envKey)
+	if t == "" {
+		return def
+	}
+	return strings.ReplaceAll(t, `\n`, "\n")
+}
+
+// GetAttemptTemplate — return template untuk attempt N (1, 2, 3). Default ke attempt 1 kalau N out of range.
+func GetAttemptTemplate(attempt int) string {
+	if attempt < 1 || attempt > 3 {
+		attempt = 1
+	}
+	return attemptTemplates[attempt-1]
+}
+
+// renderTemplateWithVars — substitusi {{nama_outlet}} dan {{nomer_invoice}}
+func renderTemplateWithVars(tpl, namaOutlet, nomerInvoice string) string {
+	out := tpl
+	out = strings.ReplaceAll(out, "{{nama_outlet}}", namaOutlet)
+	out = strings.ReplaceAll(out, "{{nomer_invoice}}", nomerInvoice)
+	return out
+}
+
+// resolveSenderPhone — ambil phone number dari incoming MessageInfo.
+// Handle LID (@lid) → phone (@s.whatsapp.net) mapping yang muncul di WA versi terbaru
+// untuk privacy. Urutan resolve:
+//  1. Kalau Sender server = s.whatsapp.net → langsung pakai User
+//  2. Kalau SenderAlt server = s.whatsapp.net → pakai SenderAlt.User
+//  3. Kalau Sender adalah @lid, lookup via whatsmeow LID store
+//  4. Kalau gagal semua, return ""
+func resolveSenderPhone(info types.MessageInfo) string {
+	if info.Sender.Server == types.DefaultUserServer && info.Sender.User != "" {
+		return info.Sender.User
+	}
+	if info.SenderAlt.Server == types.DefaultUserServer && info.SenderAlt.User != "" {
+		return info.SenderAlt.User
+	}
+	// LID lookup — kalau whatsmeow punya mapping cached
+	if info.Sender.Server == types.HiddenUserServer && state.client != nil && state.client.Store != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if lids := state.client.Store.LIDs; lids != nil {
+			if pnJID, err := lids.GetPNForLID(ctx, info.Sender); err == nil && pnJID.User != "" {
+				return pnJID.User
+			}
+		}
+	}
+	return ""
 }
 
 // isPhoneBlasted — return true kalau nomor pernah jadi target blast.
@@ -62,26 +186,72 @@ func isPhoneBlasted(phone string) bool {
 	return c > 0
 }
 
-// upsertThreadOutgoing — dipanggil setelah blast/reply outgoing.
-// Buat thread baru kalau belum ada, atau update jadi nomor itu sudah di-blast.
-func upsertThreadOutgoing(phone, namaOutlet string, blastID int64, preview string, ts time.Time) error {
+// upsertThreadBlast — dipanggil saat BLAST outgoing (attempt 1, manual user action).
+// State machine: blast SELALU set status=after_blast (termasuk reset dari done).
+// Reset current_attempt=1, last_attempt_at=now untuk fresh retry tracking.
+func upsertThreadBlast(phone, namaOutlet, nomerInvoice string, blastID int64, preview string, ts time.Time) error {
 	tsStr := ts.Format(time.RFC3339)
 	prev := truncate(preview, 80)
 	_, err := auditDB.Exec(`
-INSERT INTO chat_threads (phone, nama_outlet, last_blast_id, last_message_at, last_message_preview, last_message_direction, updated_at)
-VALUES (?, ?, ?, ?, ?, 'out', ?)
+INSERT INTO chat_threads (phone, nama_outlet, nomer_invoice, last_blast_id, last_message_at, last_message_preview, last_message_direction, status, assigned_email, assigned_name, unread_count, current_attempt, last_attempt_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, 'out', 'after_blast', NULL, NULL, 0, 1, ?, ?)
 ON CONFLICT(phone) DO UPDATE SET
 	nama_outlet = COALESCE(NULLIF(excluded.nama_outlet, ''), nama_outlet),
+	nomer_invoice = COALESCE(NULLIF(excluded.nomer_invoice, ''), nomer_invoice),
 	last_blast_id = COALESCE(excluded.last_blast_id, last_blast_id),
 	last_message_at = excluded.last_message_at,
 	last_message_preview = excluded.last_message_preview,
 	last_message_direction = 'out',
+	status = 'after_blast',
+	assigned_email = NULL,
+	assigned_name = NULL,
+	unread_count = 0,
+	current_attempt = 1,
+	last_attempt_at = excluded.last_attempt_at,
 	updated_at = excluded.updated_at`,
-		phone, namaOutlet, nullableID(blastID), tsStr, prev, tsStr)
+		phone, namaOutlet, nomerInvoice, nullableID(blastID), tsStr, prev, tsStr, tsStr)
 	return err
 }
 
-// upsertThreadIncoming — dipanggil saat incoming reply dari nomor blasted.
+// upsertThreadRetry — dipanggil saat scheduler kirim attempt 2/3.
+// HANYA update last_message + current_attempt + last_attempt_at. Tidak ubah status.
+func upsertThreadRetry(phone, preview string, attemptNum int, ts time.Time) error {
+	tsStr := ts.Format(time.RFC3339)
+	prev := truncate(preview, 80)
+	_, err := auditDB.Exec(`
+UPDATE chat_threads SET
+	last_message_at = ?,
+	last_message_preview = ?,
+	last_message_direction = 'out',
+	current_attempt = ?,
+	last_attempt_at = ?,
+	updated_at = ?
+WHERE phone = ?`, tsStr, prev, attemptNum, tsStr, tsStr, phone)
+	return err
+}
+
+// upsertThreadAgentReply — dipanggil saat AGENT balas via inbox web.
+// State: → in_progress (assigned ke user yang reply). Done LOCKED — tidak berubah.
+func upsertThreadAgentReply(phone, preview, agentEmail, agentName string, ts time.Time) error {
+	tsStr := ts.Format(time.RFC3339)
+	prev := truncate(preview, 80)
+	_, err := auditDB.Exec(`
+UPDATE chat_threads SET
+	last_message_at = ?,
+	last_message_preview = ?,
+	last_message_direction = 'out',
+	status = CASE WHEN status = 'done' THEN 'done' ELSE 'in_progress' END,
+	assigned_email = CASE WHEN status = 'done' THEN assigned_email ELSE ? END,
+	assigned_name = CASE WHEN status = 'done' THEN assigned_name ELSE ? END,
+	updated_at = ?
+WHERE phone = ?`, tsStr, prev, agentEmail, agentName, tsStr, phone)
+	return err
+}
+
+// upsertThreadIncoming — dipanggil saat incoming reply dari user.
+// State machine:
+//   - done → STAY done (locked, tidak respons reply user)
+//   - after_blast / in_progress / open → pindah ke open
 func upsertThreadIncoming(phone, preview string, ts time.Time) error {
 	tsStr := ts.Format(time.RFC3339)
 	prev := truncate(preview, 80)
@@ -91,7 +261,7 @@ UPDATE chat_threads SET
 	last_message_preview = ?,
 	last_message_direction = 'in',
 	unread_count = unread_count + 1,
-	status = CASE WHEN status = 'done' THEN 'open' ELSE status END,
+	status = CASE WHEN status = 'done' THEN 'done' ELSE 'open' END,
 	updated_at = ?
 WHERE phone = ?`, tsStr, prev, tsStr, phone)
 	return err
@@ -239,9 +409,12 @@ func handleSetStatus(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 400, "phone required")
 		return
 	}
-	if err := r.ParseForm(); err != nil {
-		httpErr(w, 400, "form: %v", err)
-		return
+	if err := r.ParseMultipartForm(2 << 20); err != nil {
+		// Bukan multipart? fallback ke URL-encoded
+		if err := r.ParseForm(); err != nil {
+			httpErr(w, 400, "form: %v", err)
+			return
+		}
 	}
 	status := r.FormValue("status")
 	if status != "open" && status != "in_progress" && status != "done" {
@@ -269,6 +442,17 @@ func handleSetStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": true})
 }
 
+// handleTemplates — return 3 attempt templates untuk preview di UI.
+func handleTemplates(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, map[string]any{
+		"attempt_1":          attemptTemplates[0],
+		"attempt_2":          attemptTemplates[1],
+		"attempt_3":          attemptTemplates[2],
+		"retry_delay_hours":  retryDelayHours,
+		"closing":            closingTemplate,
+	})
+}
+
 func handleReply(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "POST only", 405)
@@ -284,9 +468,11 @@ func handleReply(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 400, "phone required")
 		return
 	}
-	if err := r.ParseForm(); err != nil {
-		httpErr(w, 400, "form: %v", err)
-		return
+	if err := r.ParseMultipartForm(2 << 20); err != nil {
+		if err := r.ParseForm(); err != nil {
+			httpErr(w, 400, "form: %v", err)
+			return
+		}
 	}
 	body := strings.TrimSpace(r.FormValue("body"))
 	if body == "" {
@@ -295,7 +481,8 @@ func handleReply(w http.ResponseWriter, r *http.Request) {
 	}
 	user, _ := userFromCtx(r.Context())
 
-	// kirim via whatsmeow
+	// Cek status thread — kalau done, reply masih boleh tapi status tidak berubah
+	// (sesuai spec: Done lock)
 	jid := types.NewJID(phone, types.DefaultUserServer)
 	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 	defer cancel()
@@ -308,15 +495,101 @@ func handleReply(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now()
-	// record di chat_messages + thread
 	if e := recordChatMessage(phone, "out", body, "", res.ID, now, 0, user.Email, user.Name); e != nil {
 		fmt.Println("warn: recordChatMessage:", e)
 	}
-	if e := upsertThreadOutgoing(phone, "", 0, body, now); e != nil {
-		fmt.Println("warn: upsertThreadOutgoing:", e)
+	// State transition: agent reply → in_progress (kecuali kalau sudah done)
+	if e := upsertThreadAgentReply(phone, body, user.Email, user.Name, now); e != nil {
+		fmt.Println("warn: upsertThreadAgentReply:", e)
 	}
 
 	writeJSON(w, map[string]any{"ok": true, "id": res.ID})
+}
+
+// handleResolve — set status=done + kirim closing message.
+// Sesuai spec: setelah done, reply user tidak ubah status (locked).
+func handleResolve(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", 405)
+		return
+	}
+	_, loggedIn, connected := state.snapshot()
+	if !loggedIn || !connected {
+		httpErr(w, 400, "WhatsApp belum terhubung")
+		return
+	}
+	phone := r.URL.Query().Get("phone")
+	if phone == "" {
+		httpErr(w, 400, "phone required")
+		return
+	}
+	user, _ := userFromCtx(r.Context())
+
+	// Ambil nama_outlet untuk render template
+	var namaOutlet string
+	_ = auditDB.QueryRow(`SELECT COALESCE(nama_outlet, '') FROM chat_threads WHERE phone = ?`, phone).Scan(&namaOutlet)
+
+	closing := renderClosingTemplate(namaOutlet)
+
+	// Kirim closing via WA
+	jid := types.NewJID(phone, types.DefaultUserServer)
+	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+	defer cancel()
+
+	msg := &waProto.Message{Conversation: proto.String(closing)}
+	res, err := state.client.SendMessage(ctx, jid, msg)
+	if err != nil {
+		httpErr(w, 500, "send closing: %v", err)
+		return
+	}
+
+	now := time.Now()
+	if e := recordChatMessage(phone, "out", closing, "", res.ID, now, 0, user.Email, user.Name); e != nil {
+		fmt.Println("warn: recordChatMessage closing:", e)
+	}
+
+	// Set status = done + lock (assign tetap)
+	_, err = auditDB.Exec(`UPDATE chat_threads SET
+		last_message_at = ?,
+		last_message_preview = ?,
+		last_message_direction = 'out',
+		status = 'done',
+		assigned_email = ?, assigned_name = ?,
+		updated_at = ?
+		WHERE phone = ?`,
+		now.Format(time.RFC3339), truncate(closing, 80), user.Email, user.Name, now.Format(time.RFC3339), phone)
+	if err != nil {
+		httpErr(w, 500, "update status: %v", err)
+		return
+	}
+
+	writeJSON(w, map[string]any{"ok": true, "closing_sent": true})
+}
+
+// closingTemplate — di-load dari env var atau default.
+var closingTemplate string
+
+func loadClosingTemplate() {
+	t := os.Getenv("INBOX_CLOSING_TEMPLATE")
+	if t == "" {
+		t = `Baik, Terima kasih atas konfirmasinya, Kak. 😊
+Untuk percakapan ini akan saya tutup.
+
+Jika nantinya ada pertanyaan atau kendala terkait layanan majoo, mohon tidak membalas atau menghubungi nomor ini karena nomor ini hanya digunakan untuk proses konfirmasi.
+
+Untuk bantuan lebih lanjut, Kakak dapat menghubungi Hotline majoo di 0811-500-460.
+
+Terima kasih`
+	}
+	// Replace escape \n dengan newline beneran (kalau di-set via env)
+	t = strings.ReplaceAll(t, `\n`, "\n")
+	closingTemplate = t
+}
+
+func renderClosingTemplate(namaOutlet string) string {
+	out := closingTemplate
+	out = strings.ReplaceAll(out, "{{nama_outlet}}", namaOutlet)
+	return out
 }
 
 // extractTextFromMessage — ambil body text dari waProto.Message.

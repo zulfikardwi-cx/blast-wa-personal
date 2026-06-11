@@ -97,27 +97,29 @@
     </div>
     <div id="connInfo" style="color:var(--muted);font-size:13px">Memeriksa status...</div>
 
-    <h2 style="margin-top:20px">2 · Template Pesan</h2>
+    <h2 style="margin-top:20px">2 · Template Pesan (3 Attempts)</h2>
     <div class="warn">
-      <strong>Anti-banned tips:</strong> jangan blast lebih dari 100&ndash;200 nomor/hari per session, variasikan teks tiap blast, dan sertakan opsi opt-out. Risiko banned tinggi untuk DM ke nomor pribadi.
+      <strong>Flow auto-retry:</strong> Attempt 1 dikirim saat blast. Kalau no reply <span id="retryHours">24</span> jam → cron auto-kirim Attempt 2 → 24 jam lagi → Attempt 3. <br/>
+      <strong>Setelah Attempt 3 terkirim, retry STOP permanen</strong> (dibalas atau tidak). User reply di tengah-tengah juga STOP retry.
     </div>
-    <label>Template</label>
-    <textarea id="template" placeholder="Halo {{nama_outlet}}, invoice {{nomer_invoice}} sudah terbit. Mohon segera diproses. Balas STOP untuk berhenti menerima notifikasi.">Halo {{nama_outlet}},
-
-Invoice {{nomer_invoice}} sudah terbit. Mohon segera diproses pembayarannya.
-
-Terima kasih,
-majoo</textarea>
-    <div class="vars">Variabel tersedia: <code>{{nama_outlet}}</code> <code>{{nomer_invoice}}</code></div>
+    <div class="tab-row" style="margin-bottom:8px">
+      <button class="tab active" data-tplTab="1">Attempt 1</button>
+      <button class="tab" data-tplTab="2">Attempt 2</button>
+      <button class="tab" data-tplTab="3">Attempt 3</button>
+    </div>
+    <pre id="tplPreview1" class="preview" style="display:block;min-height:200px;max-height:300px">Memuat...</pre>
+    <pre id="tplPreview2" class="preview" style="display:none;min-height:200px;max-height:300px"></pre>
+    <pre id="tplPreview3" class="preview" style="display:none;min-height:200px;max-height:300px"></pre>
+    <div class="vars" style="margin-top:8px">Variabel auto-replace: <code>{{nama_outlet}}</code> <code>{{nomer_invoice}}</code></div>
 
     <div class="row" style="margin-top:12px">
       <div>
         <label>Delay min (detik)</label>
-        <input type="number" id="minDelay" value="6" min="2" />
+        <input type="number" id="minDelay" value="20" min="2" />
       </div>
       <div>
         <label>Delay max (detik)</label>
-        <input type="number" id="maxDelay" value="14" min="3" />
+        <input type="number" id="maxDelay" value="40" min="3" />
       </div>
     </div>
   </section>
@@ -255,7 +257,27 @@ $('#csv').addEventListener('change', async (e) => {
   updateStartBtn();
 });
 
-$('#template').addEventListener('input', renderPreview);
+let templates = { attempt_1: '', attempt_2: '', attempt_3: '' };
+async function loadTemplates() {
+  try {
+    const r = await fetch('/api/templates').then(r => r.json());
+    templates = r;
+    $('#tplPreview1').textContent = r.attempt_1 || '';
+    $('#tplPreview2').textContent = r.attempt_2 || '';
+    $('#tplPreview3').textContent = r.attempt_3 || '';
+    if (r.retry_delay_hours) $('#retryHours').textContent = r.retry_delay_hours;
+    renderPreview();
+  } catch (e) {}
+}
+
+document.querySelectorAll('[data-tplTab]').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('[data-tplTab]').forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+  for (let i = 1; i <= 3; i++) {
+    $('#tplPreview' + i).style.display = b.dataset.tpltab === String(i) ? 'block' : 'none';
+  }
+  renderPreview();
+}));
 
 function renderPreview() {
   if (!parsedRows.length) return;
@@ -270,7 +292,9 @@ function renderPreview() {
   });
   tbl.appendChild(tb);
   const first = parsedRows[0];
-  const tpl = $('#template').value;
+  const activeTabBtn = document.querySelector('[data-tplTab].active');
+  const tplKey = 'attempt_' + (activeTabBtn ? activeTabBtn.dataset.tpltab : '1');
+  const tpl = templates[tplKey] || '';
   $('#msgPreview').textContent = tpl
     .replaceAll('{{nama_outlet}}', first.nama_outlet || '')
     .replaceAll('{{nomer_invoice}}', first.nomer_invoice || '');
@@ -282,11 +306,9 @@ function updateStartBtn() {
 }
 
 $('#startBtn').addEventListener('click', async () => {
-  if (!confirm(`Kirim blast ke ${parsedRows.length} nomor sebagai ${me.email}?\n\nAudit log akan tercatat.`)) return;
-  const tpl = $('#template').value;
+  if (!confirm(`Kirim blast ATTEMPT 1 ke ${parsedRows.length} nomor sebagai ${me.email}?\n\nAttempt 2 & 3 akan auto-kirim 24 jam kemudian kalau no reply.`)) return;
   const file = $('#csv').files[0];
   const fd = new FormData();
-  fd.append('template', tpl);
   fd.append('csv', file);
   fd.append('min_delay', $('#minDelay').value);
   fd.append('max_delay', $('#maxDelay').value);
@@ -449,6 +471,7 @@ loadMe().then(() => {
   pollStatus();
   setInterval(pollStatus, 2500);
   loadSheetStatus();
+  loadTemplates();
   pollUnread();
   setInterval(pollUnread, 8000);
 });

@@ -88,13 +88,11 @@ func handleBlast(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 400, "form: %v", err)
 		return
 	}
-	template := strings.TrimSpace(r.FormValue("template"))
-	if template == "" {
-		httpErr(w, 400, "template kosong")
-		return
-	}
-	minDelay := atoiOr(r.FormValue("min_delay"), 6)
-	maxDelay := atoiOr(r.FormValue("max_delay"), 14)
+	// Template attempt 1 dari backend (3 template di chat.go)
+	// User-supplied template di-abaikan supaya konsisten dengan retry attempt 2/3
+	template := GetAttemptTemplate(1)
+	minDelay := atoiOr(r.FormValue("min_delay"), 20)
+	maxDelay := atoiOr(r.FormValue("max_delay"), 40)
 	if minDelay < 2 {
 		minDelay = 2
 	}
@@ -286,8 +284,8 @@ func runBlast(ctx context.Context, job *BlastJob) {
 		// Update chat thread & message (untuk Inbox) — hanya kalau berhasil kirim
 		if rec.Status == "sent" {
 			now := time.Now()
-			if err := upsertThreadOutgoing(rec.Phone, rec.NamaOutlet, job.auditID, msg, now); err != nil {
-				fmt.Println("warn: upsertThreadOutgoing:", err)
+			if err := upsertThreadBlast(rec.Phone, rec.NamaOutlet, rec.NomerInv, job.auditID, msg, now); err != nil {
+				fmt.Println("warn: upsertThreadBlast:", err)
 			}
 			if err := recordChatMessage(rec.Phone, "out", msg, "", "", now, job.auditID, job.UserEmail, job.UserName); err != nil {
 				fmt.Println("warn: recordChatMessage outgoing blast:", err)
