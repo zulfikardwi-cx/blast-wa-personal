@@ -80,6 +80,7 @@
   <img src="assets/majoo-logo.svg" class="logo" alt="majoo" />
   <div class="sep"></div>
   <h1>Blast WA Personal</h1>
+  <a href="inbox.html" id="navInbox" style="margin-left:8px;color:var(--muted);text-decoration:none;font-size:13px;padding:4px 10px;border-radius:6px;border:1px solid var(--line)">📥 Inbox <span id="navUnread" style="background:var(--lime);color:#0b1220;padding:1px 6px;border-radius:8px;margin-left:4px;font-size:10px;display:none"></span></a>
   <span id="connStatus" class="status-pill">checking...</span>
   <span style="flex:1"></span>
   <div class="user" id="userBox" style="visibility:hidden">
@@ -460,11 +461,23 @@ async function loadHistory() {
 
 function esc(s) { return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
+async function pollUnread() {
+  try {
+    const r = await apiFetch('/api/inbox/threads?status=open').then(r => r.json());
+    const unread = (r.counts && r.counts.unread) || 0;
+    const badge = $('#navUnread');
+    if (unread > 0) { badge.style.display = 'inline-block'; badge.textContent = unread; }
+    else { badge.style.display = 'none'; }
+  } catch (e) {}
+}
+
 loadMe().then(() => {
   if (me) {
     pollStatus();
     setInterval(pollStatus, 2500);
     loadSheetStatus();
+    pollUnread();
+    setInterval(pollUnread, 8000);
   }
 });
 </script>

@@ -44,6 +44,9 @@ func main() {
 	if err := initSheets(); err != nil {
 		log.Fatalf("sheets: %v", err)
 	}
+	if err := initChat(); err != nil {
+		log.Fatalf("chat: %v", err)
+	}
 
 	rootCtx := context.Background()
 	dbLog := waLog.Stdout("Database", "WARN", true)
@@ -66,7 +69,6 @@ func main() {
 			state.setConnected(true)
 			state.setQR("")
 			log.Println("connected")
-			_ = e
 		case *events.Disconnected:
 			state.setConnected(false)
 			log.Println("disconnected")
@@ -74,6 +76,8 @@ func main() {
 			state.setLoggedIn(false)
 			state.setConnected(false)
 			log.Println("logged out — re-pair required")
+		case *events.Message:
+			handleIncomingWA(e)
 		}
 	})
 
@@ -90,6 +94,7 @@ func main() {
 
 	// Optional: serve frontend juga dari backend (fallback kalau Pages down)
 	mux.HandleFunc("/", requirePage(serveIndex))
+	mux.HandleFunc("/inbox", requirePage(serveInbox))
 
 	// API endpoints — CORS-enabled untuk dipanggil dari GitHub Pages
 	mux.HandleFunc("/api/me", corsMiddleware(handleMe))
@@ -101,6 +106,13 @@ func main() {
 	mux.HandleFunc("/api/history", corsMiddleware(requireAuth(handleHistory)))
 	mux.HandleFunc("/api/sheet-status", corsMiddleware(requireAuth(handleSheetStatus)))
 	mux.HandleFunc("/api/export-sheet", corsMiddleware(requireAuth(handleExportSheet)))
+
+	// Inbox Chat endpoints
+	mux.HandleFunc("/api/inbox/threads", corsMiddleware(requireAuth(handleThreads)))
+	mux.HandleFunc("/api/inbox/messages", corsMiddleware(requireAuth(handleMessages)))
+	mux.HandleFunc("/api/inbox/read", corsMiddleware(requireAuth(handleMarkRead)))
+	mux.HandleFunc("/api/inbox/status", corsMiddleware(requireAuth(handleSetStatus)))
+	mux.HandleFunc("/api/inbox/reply", corsMiddleware(requireAuth(handleReply)))
 
 	addr := os.Getenv("ADDR")
 	if addr == "" {
@@ -215,6 +227,29 @@ func httpErr(w http.ResponseWriter, status int, format string, args ...any) {
 	http.Error(w, fmt.Sprintf(format, args...), status)
 }
 
+// handleIncomingWA — di-call dari whatsmeow event handler. Simpan reply ke chat_messages
+// dan update thread. Skip group, skip outgoing, skip dari nomor yang tidak pernah di-blast.
+func handleIncomingWA(e *events.Message) {
+	if e.Info.IsFromMe {
+		return
+	}
+	if e.Info.IsGroup {
+		return
+	}
+	phone := e.Info.Sender.User
+	if phone == "" || !isPhoneBlasted(phone) {
+		return
+	}
+	body, mediaType := extractTextFromMessage(e.Message)
+	if err := recordChatMessage(phone, "in", body, mediaType, e.Info.ID, e.Info.Timestamp, 0, "", ""); err != nil {
+		log.Println("warn: recordChatMessage incoming:", err)
+	}
+	if err := upsertThreadIncoming(phone, body, e.Info.Timestamp); err != nil {
+		log.Println("warn: upsertThreadIncoming:", err)
+	}
+	log.Println("inbox: incoming from", phone, "—", truncate(body, 40))
+}
+
 func serveLogin(w http.ResponseWriter, r *http.Request) {
 	if _, ok := userFrom(r); ok {
 		http.Redirect(w, r, "/", http.StatusFound)
@@ -225,6 +260,10 @@ func serveLogin(w http.ResponseWriter, r *http.Request) {
 
 func serveIndex(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, "static/index.html")
+}
+
+func serveInbox(w http.ResponseWriter, r *http.Request) {
+	http.ServeFile(w, r, "static/inbox.html")
 }
 
 // loadDotEnv minimal — KEY=VALUE per baris, # untuk komentar.

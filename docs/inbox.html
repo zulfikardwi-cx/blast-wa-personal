@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Inbox Chat — Blast WA Personal</title>
+<script src="config.js"></script>
+<style>
+  :root {
+    --bg:#0b1220; --panel:#121a2b; --panel2:#0f1626; --line:#223;
+    --text:#e6ecff; --muted:#8b97b8;
+    --teal:#2DBDB6; --lime:#9ACF87; --teal-soft:rgba(45,189,182,.15);
+    --warn:#f59e0b; --danger:#ef4444;
+    --bubble-in:#1f2937; --bubble-out:rgba(45,189,182,.2);
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:flex;flex-direction:column;overflow:hidden}
+  header{padding:12px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;background:var(--panel);flex-shrink:0}
+  header .logo{height:24px;width:auto;display:block}
+  header .sep{width:1px;height:20px;background:var(--line)}
+  header h1{font-size:14px;margin:0;font-weight:500;color:var(--muted);letter-spacing:.3px}
+  header a.nav{color:var(--muted);text-decoration:none;font-size:13px;padding:4px 10px;border-radius:6px;border:1px solid var(--line)}
+  header a.nav:hover{color:var(--teal);border-color:var(--teal)}
+  header a.nav.active{color:var(--teal);border-color:var(--teal);background:var(--teal-soft)}
+  .user{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+  .user img{width:24px;height:24px;border-radius:50%;border:1px solid var(--line)}
+  .status-pill{font-size:11px;padding:3px 9px;border-radius:999px;background:#1f2937;color:var(--muted)}
+  .status-pill.ok{background:rgba(45,189,182,.2);color:var(--teal)}
+  .status-pill.warn{background:#78350f;color:#fde68a}
+
+  main{flex:1;display:flex;overflow:hidden}
+
+  /* Sidebar */
+  aside{width:340px;border-right:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;flex-shrink:0}
+  .bucket-tabs{display:flex;padding:8px;gap:4px;border-bottom:1px solid var(--line)}
+  .bucket-tab{flex:1;padding:6px 8px;background:var(--panel2);color:var(--muted);border:1px solid var(--line);border-radius:6px;font-size:11px;cursor:pointer;text-align:center;font-weight:500;text-transform:uppercase;letter-spacing:.3px}
+  .bucket-tab.active{background:var(--teal-soft);color:var(--teal);border-color:var(--teal)}
+  .bucket-tab .count{display:inline-block;background:var(--line);color:var(--muted);padding:1px 5px;border-radius:6px;margin-left:4px;font-size:10px}
+  .bucket-tab.active .count{background:var(--teal);color:#0b1220}
+  .thread-list{flex:1;overflow-y:auto}
+  .thread-item{padding:12px 16px;border-bottom:1px solid var(--line);cursor:pointer;display:flex;flex-direction:column;gap:4px;position:relative}
+  .thread-item:hover{background:var(--panel2)}
+  .thread-item.selected{background:var(--teal-soft);border-left:3px solid var(--teal);padding-left:13px}
+  .thread-item .name{font-weight:600;font-size:13px;color:var(--text);display:flex;align-items:center;gap:6px}
+  .thread-item .phone{color:var(--muted);font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .thread-item .preview{color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:280px}
+  .thread-item .preview.in::before{content:"";color:var(--lime);margin-right:4px;font-weight:600}
+  .thread-item .preview.out::before{content:"";color:var(--muted);margin-right:4px}
+  .thread-item .time{color:var(--muted);font-size:10px;position:absolute;top:10px;right:14px}
+  .thread-item .unread-badge{background:var(--lime);color:#0b1220;font-size:10px;font-weight:600;padding:1px 6px;border-radius:8px;margin-left:auto}
+  .thread-item .status-dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+  .status-dot.open{background:var(--lime)}
+  .status-dot.in_progress{background:var(--warn)}
+  .status-dot.done{background:var(--muted)}
+  .empty{padding:40px 20px;text-align:center;color:var(--muted);font-size:13px}
+
+  /* Right pane */
+  section.chat{flex:1;display:flex;flex-direction:column;background:var(--panel2);overflow:hidden}
+  .chat-header{padding:12px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;background:var(--panel);flex-shrink:0}
+  .chat-header .info{flex:1}
+  .chat-header .info .h-name{font-weight:600}
+  .chat-header .info .h-phone{color:var(--muted);font-size:12px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .chat-header .actions{display:flex;gap:6px}
+  .chat-header button{font-size:12px;padding:6px 12px;border-radius:6px;cursor:pointer;border:1px solid var(--line);background:transparent;color:var(--text)}
+  .chat-header button.active{background:var(--teal);color:#0b1220;border-color:var(--teal);font-weight:600}
+  .chat-header button:hover:not(.active){background:var(--panel2)}
+  .chat-header button.warn-action{color:var(--warn);border-color:var(--warn)}
+  .chat-header button.warn-action.active{background:var(--warn);color:#0b1220}
+  .chat-header button.done-action{color:var(--muted)}
+  .chat-header button.done-action.active{background:var(--muted);color:#0b1220}
+
+  .messages{flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:8px}
+  .day-sep{text-align:center;color:var(--muted);font-size:11px;margin:12px 0;text-transform:uppercase}
+  .msg{max-width:60%;padding:8px 12px;border-radius:10px;position:relative;word-wrap:break-word;line-height:1.4;font-size:13px}
+  .msg .meta{font-size:10px;color:var(--muted);margin-top:4px;display:flex;gap:8px;align-items:center}
+  .msg.in{background:var(--bubble-in);align-self:flex-start;border-bottom-left-radius:2px}
+  .msg.out{background:var(--bubble-out);color:var(--text);align-self:flex-end;border-bottom-right-radius:2px}
+  .msg .media{color:var(--warn);font-style:italic}
+  .msg.system{background:transparent;align-self:center;color:var(--muted);font-size:11px;font-style:italic}
+
+  .reply-box{padding:12px 16px;border-top:1px solid var(--line);background:var(--panel);flex-shrink:0;display:flex;gap:10px;align-items:flex-end}
+  .reply-box textarea{flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px;font:13px/1.4 inherit;resize:none;min-height:38px;max-height:120px}
+  .reply-box textarea:focus{outline:none;border-color:var(--teal)}
+  .reply-box button{background:var(--teal);color:#0b1220;border:0;padding:10px 18px;border-radius:8px;cursor:pointer;font-weight:600;height:38px}
+  .reply-box button:disabled{opacity:.5;cursor:not-allowed}
+
+  .no-thread{flex:1;display:flex;align-items:center;justify-content:center;color:var(--muted);text-align:center;padding:40px;flex-direction:column;gap:8px}
+  .no-thread img{width:120px;opacity:.3}
+
+  .global-err{background:#7f1d1d;color:#fecaca;padding:8px 20px;font-size:12px;text-align:center}
+</style>
+</head>
+<body>
+<div id="apiErrBanner" class="global-err" style="display:none"></div>
+<header>
+  <img src="assets/majoo-logo.svg" class="logo" alt="majoo" />
+  <div class="sep"></div>
+  <a href="index.html" class="nav">Blast</a>
+  <a href="inbox.html" class="nav active">Inbox <span id="navUnread" style="background:var(--lime);color:#0b1220;padding:1px 6px;border-radius:8px;margin-left:4px;font-size:10px;display:none"></span></a>
+  <span style="flex:1"></span>
+  <span id="connStatus" class="status-pill">checking...</span>
+  <div class="user" id="userBox" style="visibility:hidden">
+    <img id="userAvatar" src="" alt="" />
+    <span id="userName">—</span>
+  </div>
+  <button class="nav" id="signoutBtn" style="background:transparent;border:1px solid var(--line);cursor:pointer">Sign out</button>
+</header>
+
+<main>
+  <aside>
+    <div class="bucket-tabs">
+      <button class="bucket-tab active" data-bucket="open">Open <span class="count" id="cOpen">0</span></button>
+      <button class="bucket-tab" data-bucket="in_progress">In Progress <span class="count" id="cProg">0</span></button>
+      <button class="bucket-tab" data-bucket="done">Done <span class="count" id="cDone">0</span></button>
+      <button class="bucket-tab" data-bucket="all">All</button>
+    </div>
+    <div class="thread-list" id="threadList">
+      <div class="empty">Memuat thread...</div>
+    </div>
+  </aside>
+
+  <section class="chat">
+    <div id="chatEmpty" class="no-thread">
+      <div style="font-size:48px">💬</div>
+      <div>Pilih thread di kiri untuk lihat percakapan</div>
+      <div style="font-size:11px">Hanya nomor yang sudah di-blast yang muncul.<br />Reply akan masuk otomatis ke sini.</div>
+    </div>
+
+    <div id="chatContent" style="display:none;flex-direction:column;flex:1;overflow:hidden">
+      <div class="chat-header">
+        <div class="info">
+          <div class="h-name" id="hName">—</div>
+          <div class="h-phone" id="hPhone">—</div>
+        </div>
+        <div class="actions">
+          <button id="actOpen" data-s="open">Open</button>
+          <button id="actProg" class="warn-action" data-s="in_progress">In Progress</button>
+          <button id="actDone" class="done-action" data-s="done">Done</button>
+        </div>
+      </div>
+
+      <div class="messages" id="messages"></div>
+
+      <div class="reply-box">
+        <textarea id="replyText" placeholder="Tulis balasan..." rows="1"></textarea>
+        <button id="sendBtn">Kirim</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+const API_BASE = (window.APP_CONFIG && window.APP_CONFIG.API_BASE) || '';
+let me = null;
+let currentPhone = null;
+let currentBucket = 'open';
+let lastMessageID = 0;
+
+const $ = s => document.querySelector(s);
+const $$ = s => document.querySelectorAll(s);
+const esc = s => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function apiFetch(path, opts = {}) {
+  return fetch(API_BASE + path, { credentials: 'include', ...opts });
+}
+
+function showApiErr(msg) {
+  const b = $('#apiErrBanner');
+  b.textContent = msg;
+  b.style.display = 'block';
+}
+
+async function loadMe() {
+  if (!API_BASE) { showApiErr('API_BASE belum diset di config.js'); return; }
+  try {
+    const r = await apiFetch('/api/me').then(r => r.json());
+    me = r.user;
+    if (!me) { location.href = 'login.html'; return; }
+    $('#userName').textContent = me.name || me.email;
+    if (me.picture) $('#userAvatar').src = me.picture;
+    else $('#userAvatar').style.display = 'none';
+    $('#userBox').style.visibility = 'visible';
+  } catch (e) {
+    showApiErr('Tidak bisa konek ke backend (' + API_BASE + ')');
+  }
+}
+
+async function pollStatus() {
+  try {
+    const r = await apiFetch('/api/status');
+    if (r.status === 401) { location.href = 'login.html'; return; }
+    const d = await r.json();
+    const pill = $('#connStatus');
+    if (d.loggedIn && d.connected) {
+      pill.textContent = 'WA Connected';
+      pill.className = 'status-pill ok';
+    } else {
+      pill.textContent = d.hasQR ? 'Scan QR' : 'Disconnected';
+      pill.className = 'status-pill warn';
+    }
+  } catch (e) {}
+}
+
+async function loadThreads() {
+  try {
+    const r = await apiFetch(`/api/inbox/threads?status=${currentBucket}`).then(r => r.json());
+    $('#cOpen').textContent = r.counts.open || 0;
+    $('#cProg').textContent = r.counts.in_progress || 0;
+    $('#cDone').textContent = r.counts.done || 0;
+    // Nav badge for total unread
+    const unread = r.counts.unread || 0;
+    const navUnread = $('#navUnread');
+    if (unread > 0) {
+      navUnread.style.display = 'inline-block';
+      navUnread.textContent = unread;
+    } else {
+      navUnread.style.display = 'none';
+    }
+
+    const list = $('#threadList');
+    list.innerHTML = '';
+    if (!r.threads || !r.threads.length) {
+      list.innerHTML = '<div class="empty">Tidak ada thread di bucket ini.<br /><small>Blast dulu lewat halaman Blast.</small></div>';
+      return;
+    }
+    r.threads.forEach(t => {
+      const div = document.createElement('div');
+      div.className = 'thread-item';
+      if (t.phone === currentPhone) div.classList.add('selected');
+      const time = t.last_message_at ? new Date(t.last_message_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : '';
+      const dirClass = t.last_direction === 'in' ? 'in' : 'out';
+      const namaDisplay = t.nama_outlet || t.phone;
+      div.innerHTML = `
+        <div class="name">
+          <span class="status-dot ${t.status}"></span>
+          ${esc(namaDisplay)}
+          ${t.unread_count > 0 ? '<span class="unread-badge">'+t.unread_count+'</span>' : ''}
+        </div>
+        <div class="phone">+${esc(t.phone)}${t.assigned_name ? ' · '+esc(t.assigned_name) : ''}</div>
+        <div class="preview ${dirClass}">${esc(t.last_preview || '(kosong)')}</div>
+        <div class="time">${time}</div>`;
+      div.addEventListener('click', () => selectThread(t.phone));
+      list.appendChild(div);
+    });
+  } catch (e) { console.error(e); }
+}
+
+async function selectThread(phone) {
+  currentPhone = phone;
+  lastMessageID = 0;
+  $$('#threadList .thread-item').forEach(d => d.classList.remove('selected'));
+  $('#chatEmpty').style.display = 'none';
+  $('#chatContent').style.display = 'flex';
+  await loadMessages(true);
+  // mark as read
+  await apiFetch(`/api/inbox/read?phone=${encodeURIComponent(phone)}`, { method: 'POST' });
+  loadThreads(); // refresh sidebar to update unread badge
+}
+
+async function loadMessages(scrollBottom) {
+  if (!currentPhone) return;
+  try {
+    const r = await apiFetch(`/api/inbox/messages?phone=${encodeURIComponent(currentPhone)}`).then(r => r.json());
+    $('#hName').textContent = r.nama_outlet || '(no outlet name)';
+    $('#hPhone').textContent = '+' + currentPhone + (r.assigned_name ? ' · Assigned: ' + r.assigned_name : '');
+
+    // Update status buttons
+    ['Open','Prog','Done'].forEach(b => {
+      const id = '#act' + b;
+      $(id).classList.remove('active');
+    });
+    if (r.status === 'open') $('#actOpen').classList.add('active');
+    if (r.status === 'in_progress') $('#actProg').classList.add('active');
+    if (r.status === 'done') $('#actDone').classList.add('active');
+
+    const list = $('#messages');
+    const msgs = r.messages || [];
+
+    // optimization: only re-render if new messages
+    const newMaxID = msgs.length ? msgs[msgs.length-1].id : 0;
+    if (newMaxID === lastMessageID && list.children.length > 0) return;
+    lastMessageID = newMaxID;
+
+    list.innerHTML = '';
+    let lastDate = '';
+    msgs.forEach(m => {
+      const d = new Date(m.timestamp);
+      const dateStr = d.toLocaleDateString('id-ID', {weekday:'long',day:'numeric',month:'short'});
+      if (dateStr !== lastDate) {
+        const sep = document.createElement('div');
+        sep.className = 'day-sep';
+        sep.textContent = dateStr;
+        list.appendChild(sep);
+        lastDate = dateStr;
+      }
+      const div = document.createElement('div');
+      div.className = 'msg ' + m.direction;
+      const timeStr = d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+      const sender = m.direction === 'out' && m.sender_name ? esc(m.sender_name) : (m.direction === 'in' ? 'User' : 'Blast');
+      div.innerHTML = `
+        ${m.is_media ? '<div class="media">'+esc(m.body)+'</div>' : esc(m.body).replace(/\n/g,'<br>')}
+        <div class="meta">${sender} · ${timeStr}</div>`;
+      list.appendChild(div);
+    });
+    if (scrollBottom) list.scrollTop = list.scrollHeight;
+  } catch (e) { console.error(e); }
+}
+
+// status buttons
+['Open','Prog','Done'].forEach(b => {
+  $('#act' + b).addEventListener('click', async (ev) => {
+    if (!currentPhone) return;
+    const status = ev.target.dataset.s;
+    const fd = new FormData();
+    fd.append('status', status);
+    await apiFetch(`/api/inbox/status?phone=${encodeURIComponent(currentPhone)}`, { method: 'POST', body: fd });
+    loadMessages(false);
+    loadThreads();
+  });
+});
+
+// reply
+$('#sendBtn').addEventListener('click', sendReply);
+$('#replyText').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); sendReply(); }
+});
+$('#replyText').addEventListener('input', (e) => {
+  e.target.style.height = 'auto';
+  e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+});
+
+async function sendReply() {
+  const text = $('#replyText').value.trim();
+  if (!text || !currentPhone) return;
+  $('#sendBtn').disabled = true;
+  $('#sendBtn').textContent = '...';
+  const fd = new FormData();
+  fd.append('body', text);
+  try {
+    const r = await apiFetch(`/api/inbox/reply?phone=${encodeURIComponent(currentPhone)}`, { method: 'POST', body: fd });
+    if (!r.ok) {
+      alert('Gagal kirim: ' + await r.text());
+      return;
+    }
+    $('#replyText').value = '';
+    $('#replyText').style.height = 'auto';
+    await loadMessages(true);
+    loadThreads();
+  } catch (e) {
+    alert('Error: ' + e.message);
+  } finally {
+    $('#sendBtn').disabled = false;
+    $('#sendBtn').textContent = 'Kirim';
+  }
+}
+
+// bucket tabs
+$$('.bucket-tab').forEach(b => {
+  b.addEventListener('click', () => {
+    $$('.bucket-tab').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    currentBucket = b.dataset.bucket;
+    loadThreads();
+  });
+});
+
+$('#signoutBtn').addEventListener('click', async () => {
+  await apiFetch('/auth/logout', { method:'POST' });
+  location.href = 'login.html';
+});
+
+// init
+loadMe().then(() => {
+  if (!me) return;
+  pollStatus(); setInterval(pollStatus, 3000);
+  loadThreads(); setInterval(loadThreads, 5000);
+  setInterval(() => { if (currentPhone) loadMessages(false); }, 3000);
+});
+</script>
+</body>
+</html>

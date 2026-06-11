@@ -283,6 +283,17 @@ func runBlast(ctx context.Context, job *BlastJob) {
 			fmt.Println("warn: recordRecipient failed for", rec.Phone, ":", err)
 		}
 
+		// Update chat thread & message (untuk Inbox) — hanya kalau berhasil kirim
+		if rec.Status == "sent" {
+			now := time.Now()
+			if err := upsertThreadOutgoing(rec.Phone, rec.NamaOutlet, job.auditID, msg, now); err != nil {
+				fmt.Println("warn: upsertThreadOutgoing:", err)
+			}
+			if err := recordChatMessage(rec.Phone, "out", msg, "", "", now, job.auditID, job.UserEmail, job.UserName); err != nil {
+				fmt.Println("warn: recordChatMessage outgoing blast:", err)
+			}
+		}
+
 		if i < len(job.Items)-1 {
 			d := job.MinDelay + rand.Intn(job.MaxDelay-job.MinDelay+1)
 			select {
