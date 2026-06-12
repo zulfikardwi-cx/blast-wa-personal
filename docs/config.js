@@ -4,5 +4,5 @@ window.APP_CONFIG = {
   // Wajib: URL backend (Cloudflare Tunnel ke Mac yang jalanin Go app).
   // Contoh: "https://blast-wa-api.majoo.id"
   // BIARKAN kosong "" hanya saat development di mana frontend & backend sama host.
-  API_BASE: "https://reply-rich-operation-rows.trycloudflare.com",
+  API_BASE: "https://mid-dennis-luther-named.trycloudflare.com",
 };
