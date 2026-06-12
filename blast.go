@@ -317,6 +317,17 @@ func sendOne(phone, body string) error {
 		return fmt.Errorf("nomor tidak terdaftar di WhatsApp")
 	}
 
+	// 1b) Resolve PN -> LID. WhatsApp migrasi ke sistem LID; kalau penerima sudah
+	// punya LID, whatsmeow meng-enkripsi session di bawah identitas LID. Tapi kalau
+	// LIDMigrationTimestamp akun pengirim masih 0 (send.go:325), tujuan kirim tetap
+	// PN -> mismatch -> penerima tidak bisa dekripsi. Kirim langsung ke JID LID
+	// supaya alamat + enkripsi konsisten dan device list lengkap (termasuk primary :0).
+	if lid, e := state.client.Store.LIDs.GetLIDForPN(ctx, jid); e == nil && !lid.IsEmpty() {
+		jid = lid
+	} else if info, e2 := state.client.GetUserInfo(ctx, []types.JID{jid}); e2 == nil && !info[jid].LID.IsEmpty() {
+		jid = info[jid].LID
+	}
+
 	// 2) pre-fetch device list — bootstrap Signal session ke semua device penerima.
 	// Tanpa ini, kirim pertama ke nomor baru bisa "Waiting for this message" karena
 	// session belum ter-establish. Error di sini non-fatal — coba tetap kirim.
