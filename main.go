@@ -14,19 +14,19 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 	"go.mau.fi/whatsmeow"
-	waLog "go.mau.fi/whatsmeow/util/log"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types/events"
+	waLog "go.mau.fi/whatsmeow/util/log"
 
 	"github.com/mdp/qrterminal/v3"
 )
 
 type appState struct {
-	mu         sync.RWMutex
-	client     *whatsmeow.Client
-	qrCode     string // last QR string (empty when logged in)
-	loggedIn   bool
-	connected  bool
+	mu        sync.RWMutex
+	client    *whatsmeow.Client
+	qrCode    string // last QR string (empty when logged in)
+	loggedIn  bool
+	connected bool
 
 	job *BlastJob // current/last blast job
 }
@@ -113,6 +113,11 @@ func main() {
 	mux.HandleFunc("/api/export-sheet", corsMiddleware(requireAuth(handleExportSheet)))
 
 	mux.HandleFunc("/api/templates", corsMiddleware(requireAuth(handleTemplates)))
+
+	// Report belum-respons (sudah di-blast 2/3x tapi nomor tidak pernah membalas)
+	mux.HandleFunc("/api/report/unresponsive", corsMiddleware(requireAuth(handleReportUnresponsive)))
+	mux.HandleFunc("/api/report/unresponsive.csv", corsMiddleware(requireAuth(handleReportUnresponsiveCSV)))
+	mux.HandleFunc("/api/report/export-sheet", corsMiddleware(requireAuth(handleReportExportSheet)))
 
 	// Inbox Chat endpoints
 	mux.HandleFunc("/api/inbox/threads", corsMiddleware(requireAuth(handleThreads)))

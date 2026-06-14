@@ -174,6 +174,9 @@ func sendRetryOne(phone, body string) error {
 		return fmt.Errorf("nomor tidak terdaftar di WhatsApp")
 	}
 
+	// Resolve PN -> LID (sama seperti sendOne) — tanpa ini attempt 2/3 undecryptable.
+	jid = resolveToLID(ctx, jid)
+
 	// Bootstrap session
 	_, _ = state.client.GetUserDevicesContext(ctx, []types.JID{jid})
 

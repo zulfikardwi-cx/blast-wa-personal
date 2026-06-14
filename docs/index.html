@@ -155,6 +155,7 @@
     <div class="tab-row">
       <button class="tab active" data-tab="progress">Progress</button>
       <button class="tab" data-tab="history">Riwayat Blast (Audit Log)</button>
+      <button class="tab" data-tab="report">Belum Respons</button>
     </div>
 
     <div class="tab-pane active" data-pane="progress">
@@ -181,6 +182,30 @@
       <div class="scroll"><table id="historyTable">
         <thead><tr>
           <th>Waktu</th><th>User</th><th>Total</th><th>Sent</th><th>Failed</th><th>Durasi</th><th>Template</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table></div>
+    </div>
+
+    <div class="tab-pane" data-pane="report">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap">
+        <span style="color:var(--muted);font-size:12px">Nomor yang sudah di-blast berulang tapi belum pernah membalas</span>
+        <label style="font-size:12px;color:var(--muted)">Min. attempt:
+          <select id="reportMinAttempt" style="font-size:12px">
+            <option value="2">≥ 2 (2 atau 3 kali)</option>
+            <option value="3">3 (mentok attempt 3)</option>
+          </select>
+        </label>
+        <span id="reportCount" style="font-size:12px;color:var(--muted)"></span>
+        <span style="flex:1"></span>
+        <span id="reportSheetStatus" style="font-size:12px;color:var(--muted)"></span>
+        <button id="reportCsvBtn" class="ghost">⬇️ Download CSV</button>
+        <button id="reportSheetBtn" style="display:none">📊 Export ke Google Sheet</button>
+        <button class="ghost" id="refreshReport">Refresh</button>
+      </div>
+      <div class="scroll"><table id="reportTable">
+        <thead><tr>
+          <th>Phone</th><th>Nama Outlet</th><th>Nomor Invoice</th><th>Jumlah Blast</th><th>Blast Terakhir</th>
         </tr></thead>
         <tbody></tbody>
       </table></div>
@@ -412,6 +437,7 @@ $$('.tab').forEach(t => t.addEventListener('click', () => {
   t.classList.add('active');
   $(`[data-pane="${t.dataset.tab}"]`).classList.add('active');
   if (t.dataset.tab === 'history') loadHistory();
+  if (t.dataset.tab === 'report') loadReport();
 }));
 
 $('#refreshHistory').addEventListener('click', loadHistory);
@@ -482,6 +508,70 @@ async function loadHistory() {
     }
   } catch (e) { /* ignore */ }
 }
+
+// ---- Report: belum respons ----
+function reportMin() { return $('#reportMinAttempt').value || '2'; }
+
+async function loadReport() {
+  try {
+    const r = await apiFetch('/api/report/unresponsive?min_attempt=' + reportMin()).then(r => r.json());
+    const tb = $('#reportTable tbody');
+    tb.innerHTML = '';
+    (r.rows || []).forEach(row => {
+      const tr = document.createElement('tr');
+      tr.className = 'history-row';
+      const last = row.last_attempt_at ? new Date(row.last_attempt_at).toLocaleString() : '-';
+      tr.innerHTML = `
+        <td>${esc(row.phone)}</td>
+        <td>${esc(row.nama_outlet)}</td>
+        <td>${esc(row.nomer_invoice)}</td>
+        <td style="text-align:center"><span class="you-tag" style="background:var(--warn)">${row.attempts}×</span></td>
+        <td>${esc(last)}</td>`;
+      tb.appendChild(tr);
+    });
+    const n = r.count || 0;
+    $('#reportCount').textContent = n + ' nomor';
+    if (!n) tb.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px">Tidak ada nomor yang belum merespons di kriteria ini. 🎉</td></tr>';
+    // tombol Sheet hanya muncul kalau Sheets aktif
+    $('#reportSheetBtn').style.display = (sheetCfg && sheetCfg.enabled) ? '' : 'none';
+    $('#reportSheetStatus').textContent = (sheetCfg && sheetCfg.enabled) ? '' : 'Sheets export belum aktif';
+  } catch (e) { /* ignore */ }
+}
+
+$('#refreshReport').addEventListener('click', loadReport);
+$('#reportMinAttempt').addEventListener('change', loadReport);
+
+$('#reportCsvBtn').addEventListener('click', async () => {
+  const btn = $('#reportCsvBtn');
+  const original = btn.textContent;
+  btn.disabled = true; btn.textContent = '⏳ ...';
+  try {
+    // fetch dgn credentials lalu trigger download (cookie cross-site)
+    const r = await apiFetch('/api/report/unresponsive.csv?min_attempt=' + reportMin());
+    if (!r.ok) { alert('Download gagal: ' + await r.text()); return; }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'belum-respons.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  } catch (e) { alert('Download error: ' + e.message); }
+  finally { btn.textContent = original; btn.disabled = false; }
+});
+
+$('#reportSheetBtn').addEventListener('click', async () => {
+  const btn = $('#reportSheetBtn');
+  const original = btn.textContent;
+  btn.disabled = true; btn.textContent = '⏳ Exporting...';
+  try {
+    const r = await apiFetch('/api/report/export-sheet?min_attempt=' + reportMin(), { method: 'POST' });
+    if (!r.ok) { alert('Export gagal: ' + await r.text()); btn.textContent = original; btn.disabled = false; return; }
+    const d = await r.json();
+    btn.textContent = `✅ ${d.rows} baris → ${esc(d.sheet_name)}`;
+    setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 3000);
+    if (d.sheet_url) window.open(d.sheet_url, '_blank');
+  } catch (e) { alert('Export error: ' + e.message); btn.textContent = original; btn.disabled = false; }
+});
 
 function esc(s) { return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 

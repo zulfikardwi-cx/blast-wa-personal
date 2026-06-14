@@ -137,12 +137,32 @@ ORDER BY r.id ASC`)
 	})
 }
 
+// ensureSheetExists — bikin tab (sheet) baru kalau belum ada. Dipakai report export
+// supaya tab "Belum Respons" otomatis dibuat tanpa user harus bikin manual.
+func ensureSheetExists(ctx context.Context, name string) error {
+	ss, err := sheetsSvc.Spreadsheets.Get(spreadsheetID).Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("get spreadsheet: %w", err)
+	}
+	for _, s := range ss.Sheets {
+		if s.Properties != nil && s.Properties.Title == name {
+			return nil
+		}
+	}
+	_, err = sheetsSvc.Spreadsheets.BatchUpdate(spreadsheetID, &sheets.BatchUpdateSpreadsheetRequest{
+		Requests: []*sheets.Request{{
+			AddSheet: &sheets.AddSheetRequest{Properties: &sheets.SheetProperties{Title: name}},
+		}},
+	}).Context(ctx).Do()
+	return err
+}
+
 // handleSheetStatus — quick check apakah Sheets export aktif (untuk UI button enable/disable)
 func handleSheetStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{
-		"enabled":      sheetsSvc != nil,
-		"spreadsheet":  spreadsheetID,
-		"sheet_name":   sheetName,
-		"sheet_url":    fmt.Sprintf("https://docs.google.com/spreadsheets/d/%s/edit", spreadsheetID),
+		"enabled":     sheetsSvc != nil,
+		"spreadsheet": spreadsheetID,
+		"sheet_name":  sheetName,
+		"sheet_url":   fmt.Sprintf("https://docs.google.com/spreadsheets/d/%s/edit", spreadsheetID),
 	})
 }

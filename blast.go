@@ -317,16 +317,8 @@ func sendOne(phone, body string) error {
 		return fmt.Errorf("nomor tidak terdaftar di WhatsApp")
 	}
 
-	// 1b) Resolve PN -> LID. WhatsApp migrasi ke sistem LID; kalau penerima sudah
-	// punya LID, whatsmeow meng-enkripsi session di bawah identitas LID. Tapi kalau
-	// LIDMigrationTimestamp akun pengirim masih 0 (send.go:325), tujuan kirim tetap
-	// PN -> mismatch -> penerima tidak bisa dekripsi. Kirim langsung ke JID LID
-	// supaya alamat + enkripsi konsisten dan device list lengkap (termasuk primary :0).
-	if lid, e := state.client.Store.LIDs.GetLIDForPN(ctx, jid); e == nil && !lid.IsEmpty() {
-		jid = lid
-	} else if info, e2 := state.client.GetUserInfo(ctx, []types.JID{jid}); e2 == nil && !info[jid].LID.IsEmpty() {
-		jid = info[jid].LID
-	}
+	// 1b) Resolve PN -> LID (lihat resolveToLID). Wajib juga di retry attempt 2/3.
+	jid = resolveToLID(ctx, jid)
 
 	// 2) pre-fetch device list — bootstrap Signal session ke semua device penerima.
 	// Tanpa ini, kirim pertama ke nomor baru bisa "Waiting for this message" karena
@@ -342,6 +334,22 @@ func sendOne(phone, body string) error {
 		return err
 	}
 	return nil
+}
+
+// resolveToLID — WhatsApp migrasi ke sistem LID. Kalau penerima sudah punya LID,
+// whatsmeow meng-enkripsi session di bawah identitas LID, tapi tujuan kirim tetap PN
+// selama LIDMigrationTimestamp akun pengirim masih 0 (send.go:325) -> mismatch ->
+// penerima tidak bisa dekripsi ("Waiting for this message", kosong di HP). Resolve ke
+// JID LID supaya alamat + enkripsi konsisten dan device list lengkap (termasuk primary
+// :0). Return JID asli kalau LID tidak tersedia (nomor lama belum migrasi -> PN aman).
+func resolveToLID(ctx context.Context, jid types.JID) types.JID {
+	if lid, e := state.client.Store.LIDs.GetLIDForPN(ctx, jid); e == nil && !lid.IsEmpty() {
+		return lid
+	}
+	if info, e := state.client.GetUserInfo(ctx, []types.JID{jid}); e == nil && !info[jid].LID.IsEmpty() {
+		return info[jid].LID
+	}
+	return jid
 }
 
 func atoiOr(s string, def int) int {
