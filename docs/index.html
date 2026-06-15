@@ -189,13 +189,7 @@
 
     <div class="tab-pane" data-pane="report">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap">
-        <span style="color:var(--muted);font-size:12px">Nomor yang sudah di-blast berulang tapi belum pernah membalas</span>
-        <label style="font-size:12px;color:var(--muted)">Min. attempt:
-          <select id="reportMinAttempt" style="font-size:12px">
-            <option value="2">≥ 2 (2 atau 3 kali)</option>
-            <option value="3">3 (mentok attempt 3)</option>
-          </select>
-        </label>
+        <span style="color:var(--muted);font-size:12px">Nomor di bucket After Blast + In Progress yang belum merespons (keluar otomatis saat user balas / Done / Invalid)</span>
         <span id="reportCount" style="font-size:12px;color:var(--muted)"></span>
         <span style="flex:1"></span>
         <span id="reportSheetStatus" style="font-size:12px;color:var(--muted)"></span>
@@ -205,7 +199,7 @@
       </div>
       <div class="scroll"><table id="reportTable">
         <thead><tr>
-          <th>Phone</th><th>Nama Outlet</th><th>Nomor Invoice</th><th>Jumlah Blast</th><th>Blast Terakhir</th>
+          <th>Phone</th><th>Nama Outlet</th><th>Nomor Invoice</th><th>Status Attempt 1</th><th>Status Attempt 2</th><th>Status Attempt 3</th>
         </tr></thead>
         <tbody></tbody>
       </table></div>
@@ -509,29 +503,30 @@ async function loadHistory() {
   } catch (e) { /* ignore */ }
 }
 
-// ---- Report: belum respons ----
-function reportMin() { return $('#reportMinAttempt').value || '2'; }
+// ---- Report: belum respons (bucket After Blast + In Progress) ----
+function attCell(v) {
+  const color = v === 'No Response' ? 'var(--warn)' : 'var(--muted)';
+  return `<td style="text-align:center;color:${color}">${esc(v||'-')}</td>`;
+}
 
 async function loadReport() {
   try {
-    const r = await apiFetch('/api/report/unresponsive?min_attempt=' + reportMin()).then(r => r.json());
+    const r = await apiFetch('/api/report/unresponsive').then(r => r.json());
     const tb = $('#reportTable tbody');
     tb.innerHTML = '';
     (r.rows || []).forEach(row => {
       const tr = document.createElement('tr');
       tr.className = 'history-row';
-      const last = row.last_attempt_at ? new Date(row.last_attempt_at).toLocaleString() : '-';
       tr.innerHTML = `
         <td>${esc(row.phone)}</td>
         <td>${esc(row.nama_outlet)}</td>
         <td>${esc(row.nomer_invoice)}</td>
-        <td style="text-align:center"><span class="you-tag" style="background:var(--warn)">${row.attempts}×</span></td>
-        <td>${esc(last)}</td>`;
+        ${attCell(row.attempt1)}${attCell(row.attempt2)}${attCell(row.attempt3)}`;
       tb.appendChild(tr);
     });
     const n = r.count || 0;
     $('#reportCount').textContent = n + ' nomor';
-    if (!n) tb.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px">Tidak ada nomor yang belum merespons di kriteria ini. 🎉</td></tr>';
+    if (!n) tb.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:20px">Tidak ada nomor yang belum merespons. 🎉</td></tr>';
     // tombol Sheet hanya muncul kalau Sheets aktif
     $('#reportSheetBtn').style.display = (sheetCfg && sheetCfg.enabled) ? '' : 'none';
     $('#reportSheetStatus').textContent = (sheetCfg && sheetCfg.enabled) ? '' : 'Sheets export belum aktif';
@@ -539,7 +534,6 @@ async function loadReport() {
 }
 
 $('#refreshReport').addEventListener('click', loadReport);
-$('#reportMinAttempt').addEventListener('change', loadReport);
 
 $('#reportCsvBtn').addEventListener('click', async () => {
   const btn = $('#reportCsvBtn');
@@ -547,7 +541,7 @@ $('#reportCsvBtn').addEventListener('click', async () => {
   btn.disabled = true; btn.textContent = '⏳ ...';
   try {
     // fetch dgn credentials lalu trigger download (cookie cross-site)
-    const r = await apiFetch('/api/report/unresponsive.csv?min_attempt=' + reportMin());
+    const r = await apiFetch('/api/report/unresponsive.csv');
     if (!r.ok) { alert('Download gagal: ' + await r.text()); return; }
     const blob = await r.blob();
     const url = URL.createObjectURL(blob);
@@ -564,7 +558,7 @@ $('#reportSheetBtn').addEventListener('click', async () => {
   const original = btn.textContent;
   btn.disabled = true; btn.textContent = '⏳ Exporting...';
   try {
-    const r = await apiFetch('/api/report/export-sheet?min_attempt=' + reportMin(), { method: 'POST' });
+    const r = await apiFetch('/api/report/export-sheet', { method: 'POST' });
     if (!r.ok) { alert('Export gagal: ' + await r.text()); btn.textContent = original; btn.disabled = false; return; }
     const d = await r.json();
     btn.textContent = `✅ ${d.rows} baris → ${esc(d.sheet_name)}`;
