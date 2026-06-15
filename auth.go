@@ -28,10 +28,10 @@ const (
 )
 
 type SessionUser struct {
-	Email   string `json:"email"`
-	Name    string `json:"name"`
-	Picture string `json:"picture"`
-	IssuedAt int64 `json:"iat"`
+	Email    string `json:"email"`
+	Name     string `json:"name"`
+	Picture  string `json:"picture"`
+	IssuedAt int64  `json:"iat"`
 }
 
 var oauthCfg *oauth2.Config
@@ -214,7 +214,7 @@ func handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 	}
 	dest := frontendURL
 	if dest == "" {
-		dest = "/login"
+		dest = "/login.html"
 	}
 	http.Redirect(w, r, dest, http.StatusFound)
 }
@@ -348,5 +348,5 @@ func renderAuthError(w http.ResponseWriter, msg string) {
 <style>body{font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#0b1220;color:#e6ecff;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}
 .box{background:#121a2b;border:1px solid #223;border-radius:10px;padding:32px;max-width:480px;text-align:center}
 h1{font-size:18px;margin:0 0 16px}.msg{color:#fca5a5;margin-bottom:20px}a{color:#2DBDB6}</style></head><body>
-<div class="box"><h1>Login gagal</h1><p class="msg">%s</p><a href="/login">Coba lagi</a></div></body></html>`, msg)
+<div class="box"><h1>Login gagal</h1><p class="msg">%s</p><a href="/login.html">Coba lagi</a></div></body></html>`, msg)
 }

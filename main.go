@@ -90,16 +90,17 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	// Public routes (no CORS needed — server-to-browser navigation)
-	mux.HandleFunc("/login", serveLogin)
+	// Public auth routes
 	mux.HandleFunc("/auth/login", handleLogin)
 	mux.HandleFunc("/auth/callback", handleCallback)
 	mux.HandleFunc("/auth/logout", handleAuthLogout)
-	mux.Handle("/static/assets/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 
-	// Optional: serve frontend juga dari backend (fallback kalau Pages down)
-	mux.HandleFunc("/", requirePage(serveIndex))
-	mux.HandleFunc("/inbox", requirePage(serveInbox))
+	// Serve frontend (docs/) SAME-ORIGIN dari backend. Cookie session jadi first-party
+	// -> jalan di semua browser. (Akses via GitHub Pages = beda domain -> cookie pihak
+	// ketiga -> diblokir Safari/Firefox, cuma jalan di Chrome.) Auth di-handle client-side:
+	// tiap halaman fetch /api/me lalu redirect ke login.html kalau belum login. Data tetap
+	// aman karena semua endpoint /api dilindungi requireAuth.
+	mux.Handle("/", http.FileServer(http.Dir("docs")))
 
 	// API endpoints — CORS-enabled untuk dipanggil dari GitHub Pages
 	mux.HandleFunc("/api/me", corsMiddleware(handleMe))
