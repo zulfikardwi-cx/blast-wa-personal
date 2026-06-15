@@ -127,6 +127,7 @@ func main() {
 	mux.HandleFunc("/api/inbox/status", corsMiddleware(requireAuth(handleSetStatus)))
 	mux.HandleFunc("/api/inbox/reply", corsMiddleware(requireAuth(handleReply)))
 	mux.HandleFunc("/api/inbox/resolve", corsMiddleware(requireAuth(handleResolve)))
+	mux.HandleFunc("/api/inbox/sync-teams", corsMiddleware(requireAuth(handleSyncTeams)))
 
 	addr := os.Getenv("ADDR")
 	if addr == "" {

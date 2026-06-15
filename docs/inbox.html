@@ -86,6 +86,7 @@
   .status-tag.open{background:rgba(154,207,135,.2);color:var(--lime)}
   .status-tag.in_progress{background:rgba(245,158,11,.2);color:var(--warn)}
   .status-tag.done{background:rgba(139,151,184,.2);color:var(--muted)}
+  .thread-item .team-tag{display:inline-block;font-size:9px;padding:1px 7px;border-radius:8px;margin-top:6px;margin-left:6px;font-weight:600;background:rgba(45,189,182,.18);color:var(--teal);text-transform:uppercase;letter-spacing:.3px}
   .thread-item .unread{background:var(--lime);color:#0b1220;font-size:10px;font-weight:600;padding:1px 6px;border-radius:8px;position:absolute;top:14px;right:18px}
   .empty{padding:60px 20px;text-align:center;color:var(--muted);font-size:13px}
 
@@ -196,6 +197,12 @@
     <div class="search-box">
       <input type="text" id="searchInput" placeholder="Cari outlet, nomor, atau isi chat..." />
     </div>
+    <div style="display:flex;gap:8px;padding:0 12px 8px;align-items:center">
+      <select id="teamFilter" style="flex:1;font-size:12px;padding:6px;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:6px">
+        <option value="">Semua Team</option>
+      </select>
+      <button id="syncTeamBtn" title="Tarik mapping team dari Google Sheet (tab Query Blast)" style="font-size:11px;white-space:nowrap;padding:6px 10px;background:transparent;color:var(--muted);border:1px solid var(--line);border-radius:6px;cursor:pointer">🔄 Sync Team</button>
+    </div>
     <div class="thread-list" id="threadList">
       <div class="empty">Memuat...</div>
     </div>
@@ -240,6 +247,7 @@ const API_BASE = (window.APP_CONFIG && window.APP_CONFIG.API_BASE) || '';
 let me = null;
 let currentPhone = null;
 let currentBucket = 'after_blast';
+let currentTeam = '';
 let lastMessageID = 0;
 let allThreads = [];
 let searchTerm = '';
@@ -303,6 +311,7 @@ async function loadThreads() {
     else navUnread.style.display = 'none';
 
     allThreads = r.threads || [];
+    populateTeamFilter(r.teams || []);
     $('#listTitle').textContent = bucketLabels[currentBucket] || 'All';
     $('#listCount').textContent = allThreads.length;
     renderThreadList();
@@ -312,16 +321,17 @@ async function loadThreads() {
 function renderThreadList() {
   const list = $('#threadList');
   list.innerHTML = '';
-  const filtered = searchTerm
-    ? allThreads.filter(t => {
-        const s = searchTerm.toLowerCase();
-        return (t.nama_outlet||'').toLowerCase().includes(s)
-          || t.phone.includes(s)
-          || (t.last_preview||'').toLowerCase().includes(s);
-      })
-    : allThreads;
+  let filtered = allThreads;
+  if (currentTeam) filtered = filtered.filter(t => (t.team||'') === currentTeam);
+  if (searchTerm) {
+    const s = searchTerm.toLowerCase();
+    filtered = filtered.filter(t =>
+      (t.nama_outlet||'').toLowerCase().includes(s)
+      || t.phone.includes(s)
+      || (t.last_preview||'').toLowerCase().includes(s));
+  }
   if (!filtered.length) {
-    list.innerHTML = '<div class="empty">Tidak ada thread di bucket ini.<br/><small>Blast dulu lewat halaman Blast.</small></div>';
+    list.innerHTML = '<div class="empty">Tidak ada thread' + (currentTeam ? ' untuk team ini' : ' di bucket ini') + '.<br/><small>Coba ganti filter/bucket atau Sync Team.</small></div>';
     return;
   }
   filtered.forEach(t => {
@@ -341,6 +351,7 @@ function renderThreadList() {
         <div class="phone">+${esc(t.phone)}</div>
         <div class="preview">${esc(previewPrefix + (t.last_preview || ''))}</div>
         <span class="status-tag ${t.status}">${esc(bucketLabels[t.status]||t.status)}</span>
+        ${t.team ? '<span class="team-tag">'+esc(t.team)+'</span>' : ''}
       </div>
       ${t.unread_count > 0 ? '<span class="unread">'+t.unread_count+'</span>' : ''}`;
     div.addEventListener('click', () => selectThread(t.phone));
@@ -489,6 +500,34 @@ $$('.bucket-btn').forEach(b => b.addEventListener('click', () => {
 $('#searchInput').addEventListener('input', e => {
   searchTerm = e.target.value.trim();
   renderThreadList();
+});
+
+// Team filter — isi dropdown dari daftar team (pertahankan pilihan saat reload)
+function populateTeamFilter(teams) {
+  const sel = $('#teamFilter');
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">Semua Team</option>' +
+    teams.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('');
+  if (teams.includes(prev)) sel.value = prev; else { sel.value = ''; currentTeam = ''; }
+}
+$('#teamFilter').addEventListener('change', e => {
+  currentTeam = e.target.value;
+  renderThreadList();
+});
+
+// Sync Team dari Google Sheet (tab Query Blast)
+$('#syncTeamBtn').addEventListener('click', async () => {
+  const btn = $('#syncTeamBtn');
+  const original = btn.textContent;
+  btn.disabled = true; btn.textContent = '⏳ Sync...';
+  try {
+    const r = await apiFetch('/api/inbox/sync-teams', { method: 'POST' });
+    if (!r.ok) { alert('Sync gagal: ' + await r.text()); return; }
+    const d = await r.json();
+    btn.textContent = `✅ ${d.updated} ter-tag`;
+    await loadThreads();
+    setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 2500);
+  } catch (e) { alert('Sync error: ' + e.message); btn.textContent = original; btn.disabled = false; }
 });
 
 $('#signoutBtn').addEventListener('click', async e => {

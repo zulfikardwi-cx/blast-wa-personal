@@ -67,6 +67,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_wa_id ON chat_messages(wa_message
 		{"nomer_invoice", "TEXT"},
 		{"current_attempt", "INTEGER NOT NULL DEFAULT 1"},
 		{"last_attempt_at", "TEXT"},
+		{"team", "TEXT"},
+		{"area", "TEXT"},
 	}
 	for _, c := range addColumns {
 		_, e := auditDB.Exec(fmt.Sprintf("ALTER TABLE chat_threads ADD COLUMN %s %s", c.col, c.def))
@@ -283,27 +285,42 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 // ---- handlers ----
 
 type ThreadRow struct {
-	Phone              string `json:"phone"`
-	NamaOutlet         string `json:"nama_outlet"`
-	LastBlastID        int64  `json:"last_blast_id"`
-	LastMessageAt      string `json:"last_message_at"`
-	LastPreview        string `json:"last_preview"`
-	LastDirection      string `json:"last_direction"`
-	UnreadCount        int    `json:"unread_count"`
-	Status             string `json:"status"`
-	AssignedEmail      string `json:"assigned_email"`
-	AssignedName       string `json:"assigned_name"`
+	Phone         string `json:"phone"`
+	NamaOutlet    string `json:"nama_outlet"`
+	LastBlastID   int64  `json:"last_blast_id"`
+	LastMessageAt string `json:"last_message_at"`
+	LastPreview   string `json:"last_preview"`
+	LastDirection string `json:"last_direction"`
+	UnreadCount   int    `json:"unread_count"`
+	Status        string `json:"status"`
+	AssignedEmail string `json:"assigned_email"`
+	AssignedName  string `json:"assigned_name"`
+	Team          string `json:"team"`
+	Area          string `json:"area"`
 }
 
 func handleThreads(w http.ResponseWriter, r *http.Request) {
 	status := r.URL.Query().Get("status")
-	var rows *sql.Rows
-	var err error
-	if status == "" || status == "all" {
-		rows, err = auditDB.Query(`SELECT phone, COALESCE(nama_outlet,''), COALESCE(last_blast_id,0), COALESCE(last_message_at,''), COALESCE(last_message_preview,''), COALESCE(last_message_direction,''), unread_count, status, COALESCE(assigned_email,''), COALESCE(assigned_name,'') FROM chat_threads ORDER BY updated_at DESC LIMIT 200`)
-	} else {
-		rows, err = auditDB.Query(`SELECT phone, COALESCE(nama_outlet,''), COALESCE(last_blast_id,0), COALESCE(last_message_at,''), COALESCE(last_message_preview,''), COALESCE(last_message_direction,''), unread_count, status, COALESCE(assigned_email,''), COALESCE(assigned_name,'') FROM chat_threads WHERE status = ? ORDER BY updated_at DESC LIMIT 200`, status)
+	team := r.URL.Query().Get("team")
+
+	// build WHERE dinamis dari status + team (filter helper per team)
+	var conds []string
+	var qargs []any
+	if status != "" && status != "all" {
+		conds = append(conds, "status = ?")
+		qargs = append(qargs, status)
 	}
+	if team != "" && team != "all" {
+		conds = append(conds, "team = ?")
+		qargs = append(qargs, team)
+	}
+	where := ""
+	if len(conds) > 0 {
+		where = "WHERE " + strings.Join(conds, " AND ")
+	}
+	q := `SELECT phone, COALESCE(nama_outlet,''), COALESCE(last_blast_id,0), COALESCE(last_message_at,''), COALESCE(last_message_preview,''), COALESCE(last_message_direction,''), unread_count, status, COALESCE(assigned_email,''), COALESCE(assigned_name,''), COALESCE(team,''), COALESCE(area,'') FROM chat_threads ` + where + ` ORDER BY updated_at DESC LIMIT 200`
+
+	rows, err := auditDB.Query(q, qargs...)
 	if err != nil {
 		httpErr(w, 500, "query: %v", err)
 		return
@@ -314,7 +331,7 @@ func handleThreads(w http.ResponseWriter, r *http.Request) {
 	totals := map[string]int{"open": 0, "in_progress": 0, "done": 0, "unread": 0}
 	for rows.Next() {
 		var t ThreadRow
-		if err := rows.Scan(&t.Phone, &t.NamaOutlet, &t.LastBlastID, &t.LastMessageAt, &t.LastPreview, &t.LastDirection, &t.UnreadCount, &t.Status, &t.AssignedEmail, &t.AssignedName); err != nil {
+		if err := rows.Scan(&t.Phone, &t.NamaOutlet, &t.LastBlastID, &t.LastMessageAt, &t.LastPreview, &t.LastDirection, &t.UnreadCount, &t.Status, &t.AssignedEmail, &t.AssignedName, &t.Team, &t.Area); err != nil {
 			continue
 		}
 		out = append(out, t)
@@ -331,7 +348,19 @@ func handleThreads(w http.ResponseWriter, r *http.Request) {
 	totals["done"] = cDone
 	totals["unread"] = cUnread
 
-	writeJSON(w, map[string]any{"threads": out, "counts": totals})
+	// daftar team (distinct) untuk dropdown filter — lintas semua bucket biar stabil
+	teams := []string{}
+	if trows, e := auditDB.Query(`SELECT DISTINCT team FROM chat_threads WHERE team IS NOT NULL AND team != '' ORDER BY team`); e == nil {
+		for trows.Next() {
+			var tm string
+			if trows.Scan(&tm) == nil {
+				teams = append(teams, tm)
+			}
+		}
+		trows.Close()
+	}
+
+	writeJSON(w, map[string]any{"threads": out, "counts": totals, "teams": teams})
 }
 
 type MessageRow struct {
@@ -445,11 +474,11 @@ func handleSetStatus(w http.ResponseWriter, r *http.Request) {
 // handleTemplates — return 3 attempt templates untuk preview di UI.
 func handleTemplates(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{
-		"attempt_1":          attemptTemplates[0],
-		"attempt_2":          attemptTemplates[1],
-		"attempt_3":          attemptTemplates[2],
-		"retry_delay_hours":  retryDelayHours,
-		"closing":            closingTemplate,
+		"attempt_1":         attemptTemplates[0],
+		"attempt_2":         attemptTemplates[1],
+		"attempt_3":         attemptTemplates[2],
+		"retry_delay_hours": retryDelayHours,
+		"closing":           closingTemplate,
 	})
 }
 
