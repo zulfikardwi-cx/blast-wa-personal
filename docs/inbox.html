@@ -53,6 +53,7 @@
   .dot.open{background:var(--lime)}
   .dot.in_progress{background:var(--warn)}
   .dot.done{background:var(--muted)}
+  .dot.invalid{background:var(--danger)}
 
   .user-card{margin-top:auto;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px;font-size:11px;color:var(--muted)}
   .user-card b{color:var(--text);display:block;font-size:12px;font-weight:600}
@@ -86,6 +87,7 @@
   .status-tag.open{background:rgba(154,207,135,.2);color:var(--lime)}
   .status-tag.in_progress{background:rgba(245,158,11,.2);color:var(--warn)}
   .status-tag.done{background:rgba(139,151,184,.2);color:var(--muted)}
+  .status-tag.invalid{background:rgba(239,68,68,.2);color:var(--danger)}
   .thread-item .team-tag{display:inline-block;font-size:9px;padding:1px 7px;border-radius:8px;margin-top:6px;margin-left:6px;font-weight:600;background:rgba(45,189,182,.18);color:var(--teal);text-transform:uppercase;letter-spacing:.3px}
   .thread-item .unread{background:var(--lime);color:#0b1220;font-size:10px;font-weight:600;padding:1px 6px;border-radius:8px;position:absolute;top:14px;right:18px}
   .empty{padding:60px 20px;text-align:center;color:var(--muted);font-size:13px}
@@ -102,6 +104,8 @@
   .chat-header button{font-size:12px;padding:8px 14px;border-radius:8px;cursor:pointer;border:1px solid var(--line);background:transparent;color:var(--text);font-weight:500;transition:all .12s}
   .chat-header button.done-btn{background:var(--lime);color:#0b1220;border-color:var(--lime);font-weight:600}
   .chat-header button.done-btn:hover{filter:brightness(1.1)}
+  .chat-header button.invalid-btn{color:var(--danger);border-color:rgba(239,68,68,.5)}
+  .chat-header button.invalid-btn:hover{background:rgba(239,68,68,.12)}
   .chat-header button.reopen-btn{border-color:var(--blue);color:var(--blue)}
   .chat-header button.reopen-btn:hover{background:var(--blue);color:#fff}
   .chat-header button:hover:not(.done-btn):not(.reopen-btn){background:var(--panel2)}
@@ -179,6 +183,11 @@
       <span class="name">Done</span>
       <span class="count" id="cDone">0</span>
     </button>
+    <button class="bucket-btn" data-bucket="invalid">
+      <span class="dot invalid"></span>
+      <span class="name">Invalid</span>
+      <span class="count" id="cInvalid">0</span>
+    </button>
 
     <div class="user-card">
       <div><b id="userCardName">—</b></div>
@@ -226,6 +235,7 @@
         </div>
         <div class="actions">
           <button class="reopen-btn" id="actReopen" style="display:none">↺ Reopen</button>
+          <button class="invalid-btn" id="actInvalid">⚠ Invalid</button>
           <button class="done-btn" id="actDone">✓ Done / Resolved</button>
         </div>
       </div>
@@ -266,7 +276,7 @@ function apiFetch(path, opts = {}) {
 function showApiErr(msg) { $('#apiErrBanner').textContent = msg; $('#apiErrBanner').style.display = 'block'; }
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 2500); }
 
-const bucketLabels = { after_blast:'After Blast', open:'Open', in_progress:'In Progress', done:'Done' };
+const bucketLabels = { after_blast:'After Blast', open:'Open', in_progress:'In Progress', done:'Done', invalid:'Invalid' };
 
 async function loadMe() {
   try {
@@ -306,6 +316,7 @@ async function loadThreads() {
     $('#cOpen').textContent = r.counts.open || 0;
     $('#cProg').textContent = r.counts.in_progress || 0;
     $('#cDone').textContent = r.counts.done || 0;
+    $('#cInvalid').textContent = r.counts.invalid || 0;
 
     const unread = r.counts.unread || 0;
     const navUnread = $('#navUnread');
@@ -390,15 +401,20 @@ async function loadMessages(scrollBottom) {
       $('#hAssign').style.display = 'none';
     }
 
-    // Done button visibility & reply lock
+    // Action buttons & reply lock. done/invalid = terminal (terkunci, bisa Reopen).
     const replyBox = $('#replyBox');
-    if (r.status === 'done') {
+    const terminal = (r.status === 'done' || r.status === 'invalid');
+    if (terminal) {
       $('#actDone').style.display = 'none';
+      $('#actInvalid').style.display = 'none';
       $('#actReopen').style.display = '';
       replyBox.classList.add('locked');
-      $('#replyText').placeholder = 'Thread sudah Done. Blast ulang untuk reopen.';
+      $('#replyText').placeholder = (r.status === 'invalid')
+        ? 'Thread ditandai Invalid. Reopen untuk aktifkan lagi.'
+        : 'Thread sudah Done. Reopen untuk aktifkan lagi.';
     } else {
       $('#actDone').style.display = '';
+      $('#actInvalid').style.display = '';
       $('#actReopen').style.display = 'none';
       replyBox.classList.remove('locked');
       $('#replyText').placeholder = 'Tulis balasan...';
@@ -446,6 +462,23 @@ $('#actDone').addEventListener('click', () => {
   pendingDone = true;
   $('#sendBtn').textContent = 'Kirim & Tutup';
   toast('✏️ Closing message dimuat. Edit bila perlu, lalu "Kirim & Tutup" untuk menutup thread.');
+});
+
+// Invalid — nomor salah / perlu revisi. Tidak kirim pesan, pindah ke bucket Invalid.
+$('#actInvalid').addEventListener('click', async () => {
+  if (!currentPhone) return;
+  if (!confirm('Tandai thread ini sebagai INVALID?\n\nPakai kalau nomor salah / perlu revisi. TIDAK ada pesan yang dikirim. Thread pindah ke bucket Invalid & dikunci.')) return;
+  $('#actInvalid').disabled = true;
+  try {
+    const fd = new FormData(); fd.append('status', 'invalid');
+    const r = await apiFetch(`/api/inbox/status?phone=${encodeURIComponent(currentPhone)}`, { method: 'POST', body: fd });
+    if (!r.ok) { alert('Gagal: ' + await r.text()); return; }
+    toast('⚠ Thread ditandai Invalid.');
+    await loadMessages(false);
+    loadThreads();
+  } finally {
+    $('#actInvalid').disabled = false;
+  }
 });
 
 // Reopen — manual escape Done
