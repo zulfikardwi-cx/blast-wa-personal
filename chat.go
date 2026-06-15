@@ -338,11 +338,13 @@ func handleThreads(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// summary counts
-	var cOpen, cProg, cDone, cUnread int
+	var cAfter, cOpen, cProg, cDone, cUnread int
+	_ = auditDB.QueryRow(`SELECT COUNT(*) FROM chat_threads WHERE status = 'after_blast'`).Scan(&cAfter)
 	_ = auditDB.QueryRow(`SELECT COUNT(*) FROM chat_threads WHERE status = 'open'`).Scan(&cOpen)
 	_ = auditDB.QueryRow(`SELECT COUNT(*) FROM chat_threads WHERE status = 'in_progress'`).Scan(&cProg)
 	_ = auditDB.QueryRow(`SELECT COUNT(*) FROM chat_threads WHERE status = 'done'`).Scan(&cDone)
 	_ = auditDB.QueryRow(`SELECT COALESCE(SUM(unread_count), 0) FROM chat_threads`).Scan(&cUnread)
+	totals["after_blast"] = cAfter
 	totals["open"] = cOpen
 	totals["in_progress"] = cProg
 	totals["done"] = cDone
