@@ -102,8 +102,8 @@
 
     <h2 style="margin-top:20px">2 · Template Pesan (3 Attempts)</h2>
     <div class="warn">
-      <strong>Flow auto-retry:</strong> Attempt 1 dikirim saat blast. Kalau no reply <span id="retryHours">24</span> jam → cron auto-kirim Attempt 2 → 24 jam lagi → Attempt 3. <br/>
-      <strong>Setelah Attempt 3 terkirim, retry STOP permanen</strong> (dibalas atau tidak). User reply di tengah-tengah juga STOP retry.
+      <strong>Flow auto-retry:</strong> Attempt 1 dikirim saat blast. Tiap hari jam <span id="retryHours">09</span>:00 WIB, cron memproses antrian <em>Belum Respons</em> (After Blast + In Progress) → auto-kirim Attempt 2, lalu hari berikutnya Attempt 3 (maks 1 attempt/hari per nomor, jeda 20–40 detik antar kirim). <br/>
+      <strong>Setelah Attempt 3 terkirim, retry STOP permanen</strong> (dibalas atau tidak). User reply (status → Open) langsung keluar dari antrian retry.
     </div>
     <div class="tab-row" style="margin-bottom:8px">
       <button class="tab active" data-tplTab="1">Attempt 1</button>
@@ -310,7 +310,7 @@ async function loadTemplates() {
     $('#tplPreview1').textContent = r.attempt_1 || '';
     $('#tplPreview2').textContent = r.attempt_2 || '';
     $('#tplPreview3').textContent = r.attempt_3 || '';
-    if (r.retry_delay_hours) $('#retryHours').textContent = r.retry_delay_hours;
+    if (r.retry_window_hour != null) $('#retryHours').textContent = String(r.retry_window_hour).padStart(2, '0');
     renderPreview();
   } catch (e) {}
 }
@@ -353,7 +353,7 @@ function updateStartBtn() {
 }
 
 $('#startBtn').addEventListener('click', async () => {
-  if (!confirm(`Kirim blast ATTEMPT 1 ke ${parsedRows.length} nomor sebagai ${me.email}?\n\nAttempt 2 & 3 akan auto-kirim 24 jam kemudian kalau no reply.`)) return;
+  if (!confirm(`Kirim blast ATTEMPT 1 ke ${parsedRows.length} nomor sebagai ${me.email}?\n\nAttempt 2 & 3 akan auto-kirim tiap pagi (jam 09:00 WIB) kalau no reply.`)) return;
   const file = $('#csv').files[0];
   const fd = new FormData();
   fd.append('csv', file);

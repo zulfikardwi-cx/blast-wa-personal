@@ -20,21 +20,30 @@ var (
 	retryMu          sync.Mutex
 	retryRunning     bool
 	retryIntervalMin int
-	retryDelayHours  int
+	retryWindowHour  int
 	retryMinJitter   int
 	retryMaxJitter   int
+	wibLoc           *time.Location
 )
 
 // startRetryScheduler — jalankan goroutine background yang cek thread retry tiap
-// RETRY_CHECK_INTERVAL_MINUTES menit.
+// RETRY_CHECK_INTERVAL_MINUTES menit. Blast attempt 2/3 hanya dijalankan saat masuk
+// window jam RETRY_WINDOW_HOUR (WIB), maksimal 1x/hari kalender per thread.
 func startRetryScheduler() {
-	retryIntervalMin = atoiEnv("RETRY_CHECK_INTERVAL_MINUTES", 60)
-	retryDelayHours = atoiEnv("RETRY_DELAY_HOURS", 24)
+	retryIntervalMin = atoiEnv("RETRY_CHECK_INTERVAL_MINUTES", 30)
+	retryWindowHour = atoiEnv("RETRY_WINDOW_HOUR", 9)
 	retryMinJitter = atoiEnv("RETRY_SEND_MIN_DELAY", 20)
 	retryMaxJitter = atoiEnv("RETRY_SEND_MAX_DELAY", 40)
 
-	log.Printf("retry scheduler: interval=%dm delay=%dh jitter=%d-%ds",
-		retryIntervalMin, retryDelayHours, retryMinJitter, retryMaxJitter)
+	var err error
+	wibLoc, err = time.LoadLocation("Asia/Jakarta")
+	if err != nil {
+		wibLoc = time.FixedZone("WIB", 7*3600)
+		log.Printf("retry scheduler: LoadLocation Asia/Jakarta gagal (%v), fallback fixed UTC+7", err)
+	}
+
+	log.Printf("retry scheduler: interval=%dm window=%02d:00 WIB jitter=%d-%ds (max 1x/hari per thread)",
+		retryIntervalMin, retryWindowHour, retryMinJitter, retryMaxJitter)
 
 	go func() {
 		// Delay awal 2 menit setelah start, biar WA connect dulu
@@ -65,22 +74,31 @@ func processRetries() {
 		retryMu.Unlock()
 	}()
 
+	// Window guard: blast attempt hanya distart saat masuk jam window (WIB). Batch yang
+	// sudah jalan boleh lanjut lewat jam window (di-proteksi single-flight lock di atas).
+	now := time.Now().In(wibLoc)
+	if now.Hour() != retryWindowHour {
+		return
+	}
+
 	// Cek WA connected
 	_, loggedIn, connected := state.snapshot()
 	if !loggedIn || !connected {
 		return
 	}
 
-	cutoffTime := time.Now().Add(-time.Duration(retryDelayHours) * time.Hour).Format(time.RFC3339)
+	// "max 1x/hari per thread": eligible kalau belum pernah di-attempt pada hari kalender
+	// ini (WIB). startOfToday = 00:00 WIB hari ini.
+	startOfToday := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, wibLoc)
 
+	// List "Belum Respons" = after_blast + in_progress (sama persis dgn report.go).
+	// Begitu user balas → status pindah ke 'open' → otomatis keluar antrian.
 	rows, err := auditDB.Query(`
-SELECT phone, COALESCE(nama_outlet, ''), COALESCE(nomer_invoice, ''), current_attempt
+SELECT phone, COALESCE(nama_outlet, ''), COALESCE(nomer_invoice, ''), current_attempt, COALESCE(last_attempt_at, '')
 FROM chat_threads
-WHERE status = 'after_blast'
+WHERE status IN ('after_blast', 'in_progress')
   AND current_attempt < 3
-  AND (last_attempt_at IS NULL OR last_attempt_at < ?)
-ORDER BY last_attempt_at ASC
-LIMIT 100`, cutoffTime)
+ORDER BY current_attempt DESC, last_attempt_at ASC`)
 	if err != nil {
 		log.Printf("retry: query error: %v", err)
 		return
@@ -93,9 +111,14 @@ LIMIT 100`, cutoffTime)
 	var batch []retryRow
 	for rows.Next() {
 		var r retryRow
-		if err := rows.Scan(&r.phone, &r.namaOutlet, &r.nomerInvoice, &r.currentAttempt); err == nil {
-			batch = append(batch, r)
+		var lastAt string
+		if err := rows.Scan(&r.phone, &r.namaOutlet, &r.nomerInvoice, &r.currentAttempt, &lastAt); err != nil {
+			continue
 		}
+		if attemptedToday(lastAt, startOfToday) {
+			continue // sudah dikirimi attempt hari ini, skip
+		}
+		batch = append(batch, r)
 	}
 	rows.Close()
 
@@ -103,12 +126,13 @@ LIMIT 100`, cutoffTime)
 		return
 	}
 
-	log.Printf("retry: processing %d threads (cutoff=%s)", len(batch), cutoffTime)
+	log.Printf("retry: window %02d:00 WIB — antrikan %d threads (after_blast + in_progress)", retryWindowHour, len(batch))
 
 	sent, failed := 0, 0
 	for i, r := range batch {
-		// Re-check status — kalau user balas antara query dan send, skip
-		if !stillNeedsRetry(r.phone) {
+		// Re-check sebelum send — kalau user balas (→ open) atau sudah dikirimi hari ini
+		// (run lain) antara query dan send, skip.
+		if !stillNeedsRetry(r.phone, startOfToday) {
 			continue
 		}
 
@@ -149,15 +173,36 @@ LIMIT 100`, cutoffTime)
 	log.Printf("retry: batch done — sent=%d failed=%d", sent, failed)
 }
 
-// stillNeedsRetry — re-check status di DB sebelum send (race condition guard)
-func stillNeedsRetry(phone string) bool {
-	var status string
-	var ca int
-	err := auditDB.QueryRow(`SELECT status, current_attempt FROM chat_threads WHERE phone = ?`, phone).Scan(&status, &ca)
+// attemptedToday — true kalau last_attempt_at jatuh pada hari kalender yang sama
+// (instant >= startOfToday WIB). Kosong/unparseable = belum pernah → false (eligible).
+// Perbandingan instant absolut, jadi aman walau offset timestamp tersimpan beda-beda.
+func attemptedToday(lastAt string, startOfToday time.Time) bool {
+	if lastAt == "" {
+		return false
+	}
+	t, err := time.Parse(time.RFC3339, lastAt)
 	if err != nil {
 		return false
 	}
-	return status == "after_blast" && ca < 3
+	return !t.Before(startOfToday)
+}
+
+// stillNeedsRetry — re-check sebelum send (race guard): masih di bucket belum-respons,
+// belum mentok 3 attempt, dan belum dikirimi hari ini.
+func stillNeedsRetry(phone string, startOfToday time.Time) bool {
+	var status, lastAt string
+	var ca int
+	err := auditDB.QueryRow(`SELECT status, current_attempt, COALESCE(last_attempt_at, '') FROM chat_threads WHERE phone = ?`, phone).Scan(&status, &ca, &lastAt)
+	if err != nil {
+		return false
+	}
+	if status != "after_blast" && status != "in_progress" {
+		return false
+	}
+	if ca >= 3 {
+		return false
+	}
+	return !attemptedToday(lastAt, startOfToday)
 }
 
 func sendRetryOne(phone, body string) error {

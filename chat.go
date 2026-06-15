@@ -482,7 +482,7 @@ func handleTemplates(w http.ResponseWriter, r *http.Request) {
 		"attempt_1":         attemptTemplates[0],
 		"attempt_2":         attemptTemplates[1],
 		"attempt_3":         attemptTemplates[2],
-		"retry_delay_hours": retryDelayHours,
+		"retry_window_hour": retryWindowHour,
 		"closing":           closingTemplate,
 	})
 }
