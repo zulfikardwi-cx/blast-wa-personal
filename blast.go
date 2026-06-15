@@ -204,7 +204,12 @@ func safeAt(row []string, i int) string {
 	return strings.TrimSpace(row[i])
 }
 
-// normalizePhone: keep digits, convert leading 0 -> 62 (Indonesia), strip leading +.
+// normalizePhone: ambil digit saja, normalkan ke format internasional Indonesia (62...).
+// Tangani 3 format umum dari CSV:
+//   - "628xxx"  -> sudah benar, biarkan
+//   - "08xxx"   -> ganti 0 jadi 62
+//   - "8xxx"    -> tanpa 0/62 (sering dari Excel yang buang leading 0) -> tambah 62
+// Tanpa ini, "8xxx" dicek sebagai "+8..." (mis. +82 = Korea) -> dianggap tidak terdaftar.
 func normalizePhone(raw string) string {
 	var b strings.Builder
 	for _, ch := range strings.TrimSpace(raw) {
@@ -216,8 +221,13 @@ func normalizePhone(raw string) string {
 	if s == "" {
 		return ""
 	}
-	if strings.HasPrefix(s, "0") {
+	switch {
+	case strings.HasPrefix(s, "62"):
+		// sudah format internasional
+	case strings.HasPrefix(s, "0"):
 		s = "62" + s[1:]
+	case strings.HasPrefix(s, "8"):
+		s = "62" + s
 	}
 	return s
 }
