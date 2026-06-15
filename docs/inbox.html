@@ -248,6 +248,8 @@ let me = null;
 let currentPhone = null;
 let currentBucket = 'after_blast';
 let currentTeam = '';
+let closingTemplateText = '';
+let pendingDone = false;
 let lastMessageID = 0;
 let allThreads = [];
 let searchTerm = '';
@@ -362,6 +364,8 @@ function renderThreadList() {
 async function selectThread(phone) {
   currentPhone = phone;
   lastMessageID = 0;
+  pendingDone = false;
+  $('#sendBtn').textContent = 'Kirim';
   $$('#threadList .thread-item').forEach(d => d.classList.remove('selected'));
   $('#chatEmpty').style.display = 'none';
   $('#chatContent').style.display = 'flex';
@@ -374,6 +378,7 @@ async function loadMessages(scrollBottom) {
   if (!currentPhone) return;
   try {
     const r = await apiFetch(`/api/inbox/messages?phone=${encodeURIComponent(currentPhone)}`).then(r => r.json());
+    closingTemplateText = r.closing_template || '';
     const nama = r.nama_outlet || '(no outlet)';
     $('#hName').textContent = nama;
     $('#hPhone').textContent = '+' + currentPhone;
@@ -429,22 +434,18 @@ async function loadMessages(scrollBottom) {
   } catch (e) { console.error(e); }
 }
 
-// Done = resolve (send closing + lock)
-$('#actDone').addEventListener('click', async () => {
+// Done = muat closing message ke kotak balasan agar agent bisa edit dulu.
+// Thread baru pindah ke Done SETELAH agent menekan Kirim (lihat sendReply).
+$('#actDone').addEventListener('click', () => {
   if (!currentPhone) return;
-  if (!confirm('Tandai thread ini sebagai Done?\n\nClosing message akan otomatis terkirim ke user, dan thread akan dikunci (reply user setelah ini tidak ubah status).')) return;
-  $('#actDone').disabled = true;
-  $('#actDone').textContent = 'Mengirim...';
-  try {
-    const r = await apiFetch(`/api/inbox/resolve?phone=${encodeURIComponent(currentPhone)}`, { method: 'POST' });
-    if (!r.ok) { alert('Gagal: ' + await r.text()); return; }
-    toast('✅ Thread di-Done. Closing message terkirim.');
-    await loadMessages(true);
-    loadThreads();
-  } finally {
-    $('#actDone').disabled = false;
-    $('#actDone').textContent = '✓ Done / Resolved';
-  }
+  const ta = $('#replyText');
+  ta.value = closingTemplateText || '';
+  ta.style.height = 'auto';
+  ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
+  ta.focus();
+  pendingDone = true;
+  $('#sendBtn').textContent = 'Kirim & Tutup';
+  toast('✏️ Closing message dimuat. Edit bila perlu, lalu "Kirim & Tutup" untuk menutup thread.');
 });
 
 // Reopen — manual escape Done
@@ -472,6 +473,7 @@ $('#replyText').addEventListener('input', e => {
 async function sendReply() {
   const text = $('#replyText').value.trim();
   if (!text || !currentPhone) return;
+  const closing = pendingDone;            // tutup thread setelah kirim?
   $('#sendBtn').disabled = true;
   $('#sendBtn').textContent = '...';
   const fd = new FormData();
@@ -480,11 +482,17 @@ async function sendReply() {
     const r = await apiFetch(`/api/inbox/reply?phone=${encodeURIComponent(currentPhone)}`, { method: 'POST', body: fd });
     if (!r.ok) { alert('Gagal: ' + await r.text()); return; }
     $('#replyText').value = ''; $('#replyText').style.height = 'auto';
+    if (closing) {
+      const sf = new FormData(); sf.append('status', 'done');
+      const sr = await apiFetch(`/api/inbox/status?phone=${encodeURIComponent(currentPhone)}`, { method: 'POST', body: sf });
+      if (sr.ok) { pendingDone = false; toast('✅ Pesan terkirim. Thread ditutup (Done).'); }
+      else { alert('Pesan terkirim, tapi gagal menutup thread: ' + await sr.text()); }
+    }
     await loadMessages(true);
     loadThreads();
   } finally {
     $('#sendBtn').disabled = false;
-    $('#sendBtn').textContent = 'Kirim';
+    $('#sendBtn').textContent = pendingDone ? 'Kirim & Tutup' : 'Kirim';
   }
 }
 

@@ -404,12 +404,13 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 	_ = auditDB.QueryRow(`SELECT COALESCE(nama_outlet,''), status, COALESCE(assigned_email,''), COALESCE(assigned_name,'') FROM chat_threads WHERE phone = ?`, phone).Scan(&nama, &status, &assignedEmail, &assignedName)
 
 	writeJSON(w, map[string]any{
-		"phone":          phone,
-		"nama_outlet":    nama,
-		"status":         status,
-		"assigned_email": assignedEmail,
-		"assigned_name":  assignedName,
-		"messages":       out,
+		"phone":            phone,
+		"nama_outlet":      nama,
+		"status":           status,
+		"assigned_email":   assignedEmail,
+		"assigned_name":    assignedName,
+		"messages":         out,
+		"closing_template": renderClosingTemplate(nama),
 	})
 }
 
