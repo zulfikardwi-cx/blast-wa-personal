@@ -33,6 +33,12 @@ type appState struct {
 
 var state = &appState{}
 
+// guard supaya auto re-pair (repairAfterLogout) tidak jalan dobel
+var (
+	repairMu  sync.Mutex
+	repairing bool
+)
+
 func main() {
 	loadDotEnv()
 	if err := initAuth(); err != nil {
@@ -76,7 +82,9 @@ func main() {
 		case *events.LoggedOut:
 			state.setLoggedIn(false)
 			state.setConnected(false)
-			log.Println("logged out — re-pair required")
+			state.setQR("")
+			log.Println("logged out — auto re-pair: QR baru akan muncul, scan dari HP (tanpa perlu restart)")
+			go repairAfterLogout(client)
 		case *events.Message:
 			handleIncomingWA(e)
 		case *events.UndecryptableMessage:
@@ -152,9 +160,35 @@ func main() {
 	_ = srv.Shutdown(ctx)
 }
 
+// repairAfterLogout — dipanggil saat *events.LoggedOut. Tanpa ini backend nyangkut
+// "hang tanpa QR" (connectAndPair cuma jalan sekali saat startup). Di-guard supaya
+// tidak ada dua flow pairing berjalan barengan.
+func repairAfterLogout(client *whatsmeow.Client) {
+	repairMu.Lock()
+	if repairing {
+		repairMu.Unlock()
+		return
+	}
+	repairing = true
+	repairMu.Unlock()
+	defer func() {
+		repairMu.Lock()
+		repairing = false
+		repairMu.Unlock()
+	}()
+
+	client.Disconnect()
+	time.Sleep(2 * time.Second) // beri waktu socket tutup & store terhapus (Store.ID -> nil)
+	connectAndPair(client)
+}
+
 func connectAndPair(client *whatsmeow.Client) {
 	if client.Store.ID == nil {
-		qrChan, _ := client.GetQRChannel(context.Background())
+		qrChan, err := client.GetQRChannel(context.Background())
+		if err != nil {
+			log.Printf("QR channel: %v", err)
+			return
+		}
 		if err := client.Connect(); err != nil {
 			log.Printf("connect: %v", err)
 			return
