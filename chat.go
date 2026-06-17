@@ -341,11 +341,12 @@ func handleThreads(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// summary counts
-	var cAfter, cOpen, cProg, cOnGoing, cDone, cInvalid, cUnread int
+	var cAfter, cOpen, cProg, cOnGoing, cForce, cDone, cInvalid, cUnread int
 	_ = auditDB.QueryRow(`SELECT COUNT(*) FROM chat_threads WHERE status = 'after_blast'`).Scan(&cAfter)
 	_ = auditDB.QueryRow(`SELECT COUNT(*) FROM chat_threads WHERE status = 'open'`).Scan(&cOpen)
 	_ = auditDB.QueryRow(`SELECT COUNT(*) FROM chat_threads WHERE status = 'in_progress'`).Scan(&cProg)
 	_ = auditDB.QueryRow(`SELECT COUNT(*) FROM chat_threads WHERE status = 'on_going'`).Scan(&cOnGoing)
+	_ = auditDB.QueryRow(`SELECT COUNT(*) FROM chat_threads WHERE status = 'force_close'`).Scan(&cForce)
 	_ = auditDB.QueryRow(`SELECT COUNT(*) FROM chat_threads WHERE status = 'done'`).Scan(&cDone)
 	_ = auditDB.QueryRow(`SELECT COUNT(*) FROM chat_threads WHERE status = 'invalid'`).Scan(&cInvalid)
 	_ = auditDB.QueryRow(`SELECT COALESCE(SUM(unread_count), 0) FROM chat_threads`).Scan(&cUnread)
@@ -353,6 +354,7 @@ func handleThreads(w http.ResponseWriter, r *http.Request) {
 	totals["open"] = cOpen
 	totals["in_progress"] = cProg
 	totals["on_going"] = cOnGoing
+	totals["force_close"] = cForce
 	totals["done"] = cDone
 	totals["invalid"] = cInvalid
 	totals["unread"] = cUnread
@@ -456,8 +458,8 @@ func handleSetStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	status := r.FormValue("status")
-	if status != "open" && status != "in_progress" && status != "done" && status != "invalid" && status != "on_going" {
-		httpErr(w, 400, "status invalid (open|in_progress|done|invalid|on_going)")
+	if status != "open" && status != "in_progress" && status != "done" && status != "invalid" && status != "on_going" && status != "force_close" {
+		httpErr(w, 400, "status invalid (open|in_progress|done|invalid|on_going|force_close)")
 		return
 	}
 	user, _ := userFromCtx(r.Context())

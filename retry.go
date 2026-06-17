@@ -168,7 +168,13 @@ ORDER BY current_attempt DESC, last_attempt_at ASC`)
 
 		log.Printf("retry: phone=%s attempt %d sent", r.phone, nextAttempt)
 		if nextAttempt >= 3 {
-			log.Printf("retry: phone=%s reached MAX ATTEMPTS — no more auto-retry akan dijalankan untuk nomor ini", r.phone)
+			// Attempt 3 (terakhir) terkirim & tetap belum ada respons → pindah dari
+			// after_blast ke force_close. Hanya kalau masih after_blast (kalau sudah
+			// balas/diubah, jangan timpa). Otomatis keluar dari auto-retry & Belum Respons.
+			if _, err := auditDB.Exec(`UPDATE chat_threads SET status='force_close', updated_at=datetime('now') WHERE phone=? AND status='after_blast'`, r.phone); err != nil {
+				log.Printf("retry: set force_close error: %v", err)
+			}
+			log.Printf("retry: phone=%s attempt 3 terkirim → force_close (no response)", r.phone)
 		}
 		sent++
 

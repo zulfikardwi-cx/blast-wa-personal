@@ -55,6 +55,7 @@
   .dot.done{background:var(--muted)}
   .dot.invalid{background:var(--danger)}
   .dot.on_going{background:#a78bfa}
+  .dot.force_close{background:#64748b}
 
   .user-card{margin-top:auto;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px;font-size:11px;color:var(--muted)}
   .user-card b{color:var(--text);display:block;font-size:12px;font-weight:600}
@@ -90,6 +91,7 @@
   .status-tag.done{background:rgba(139,151,184,.2);color:var(--muted)}
   .status-tag.invalid{background:rgba(239,68,68,.2);color:var(--danger)}
   .status-tag.on_going{background:rgba(167,139,250,.2);color:#a78bfa}
+  .status-tag.force_close{background:rgba(100,116,139,.2);color:#94a3b8}
   .thread-item .team-tag{display:inline-block;font-size:9px;padding:1px 7px;border-radius:8px;margin-top:6px;margin-left:6px;font-weight:600;background:rgba(45,189,182,.18);color:var(--teal);text-transform:uppercase;letter-spacing:.3px}
   .thread-item .unread{background:var(--lime);color:#0b1220;font-size:10px;font-weight:600;padding:1px 6px;border-radius:8px;position:absolute;top:14px;right:18px}
   .empty{padding:60px 20px;text-align:center;color:var(--muted);font-size:13px}
@@ -197,6 +199,11 @@
       <span class="name">Invalid</span>
       <span class="count" id="cInvalid">0</span>
     </button>
+    <button class="bucket-btn" data-bucket="force_close">
+      <span class="dot force_close"></span>
+      <span class="name">Force Close</span>
+      <span class="count" id="cForceClose">0</span>
+    </button>
 
     <div class="user-card">
       <div><b id="userCardName">—</b></div>
@@ -286,7 +293,7 @@ function apiFetch(path, opts = {}) {
 function showApiErr(msg) { $('#apiErrBanner').textContent = msg; $('#apiErrBanner').style.display = 'block'; }
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 2500); }
 
-const bucketLabels = { after_blast:'After Blast', open:'Open', in_progress:'In Progress', on_going:'On Going', done:'Done', invalid:'Invalid' };
+const bucketLabels = { after_blast:'After Blast', open:'Open', in_progress:'In Progress', on_going:'On Going', force_close:'Force Close', done:'Done', invalid:'Invalid' };
 
 async function loadMe() {
   try {
@@ -328,6 +335,7 @@ async function loadThreads() {
     $('#cOnGoing').textContent = r.counts.on_going || 0;
     $('#cDone').textContent = r.counts.done || 0;
     $('#cInvalid').textContent = r.counts.invalid || 0;
+    $('#cForceClose').textContent = r.counts.force_close || 0;
 
     const unread = r.counts.unread || 0;
     const navUnread = $('#navUnread');
