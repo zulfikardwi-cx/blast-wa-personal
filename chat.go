@@ -318,7 +318,10 @@ func handleThreads(w http.ResponseWriter, r *http.Request) {
 	if len(conds) > 0 {
 		where = "WHERE " + strings.Join(conds, " AND ")
 	}
-	q := `SELECT phone, COALESCE(nama_outlet,''), COALESCE(last_blast_id,0), COALESCE(last_message_at,''), COALESCE(last_message_preview,''), COALESCE(last_message_direction,''), unread_count, status, COALESCE(assigned_email,''), COALESCE(assigned_name,''), COALESCE(team,''), COALESCE(area,'') FROM chat_threads ` + where + ` ORDER BY updated_at DESC LIMIT 200`
+	// Urut by last_message_at (waktu pesan asli), BUKAN updated_at — supaya buka/klik
+	// thread (yang hanya bump updated_at via mark-read) tidak mengubah urutan. Pesan
+	// terbaru tetap di atas; tiebreak phone biar deterministik (stabil saat re-fetch).
+	q := `SELECT phone, COALESCE(nama_outlet,''), COALESCE(last_blast_id,0), COALESCE(last_message_at,''), COALESCE(last_message_preview,''), COALESCE(last_message_direction,''), unread_count, status, COALESCE(assigned_email,''), COALESCE(assigned_name,''), COALESCE(team,''), COALESCE(area,'') FROM chat_threads ` + where + ` ORDER BY last_message_at DESC, phone ASC LIMIT 200`
 
 	rows, err := auditDB.Query(q, qargs...)
 	if err != nil {
