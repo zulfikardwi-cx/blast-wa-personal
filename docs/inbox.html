@@ -54,6 +54,7 @@
   .dot.in_progress{background:var(--warn)}
   .dot.done{background:var(--muted)}
   .dot.invalid{background:var(--danger)}
+  .dot.on_going{background:#a78bfa}
 
   .user-card{margin-top:auto;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px;font-size:11px;color:var(--muted)}
   .user-card b{color:var(--text);display:block;font-size:12px;font-weight:600}
@@ -88,6 +89,7 @@
   .status-tag.in_progress{background:rgba(245,158,11,.2);color:var(--warn)}
   .status-tag.done{background:rgba(139,151,184,.2);color:var(--muted)}
   .status-tag.invalid{background:rgba(239,68,68,.2);color:var(--danger)}
+  .status-tag.on_going{background:rgba(167,139,250,.2);color:#a78bfa}
   .thread-item .team-tag{display:inline-block;font-size:9px;padding:1px 7px;border-radius:8px;margin-top:6px;margin-left:6px;font-weight:600;background:rgba(45,189,182,.18);color:var(--teal);text-transform:uppercase;letter-spacing:.3px}
   .thread-item .unread{background:var(--lime);color:#0b1220;font-size:10px;font-weight:600;padding:1px 6px;border-radius:8px;position:absolute;top:14px;right:18px}
   .empty{padding:60px 20px;text-align:center;color:var(--muted);font-size:13px}
@@ -106,6 +108,8 @@
   .chat-header button.done-btn:hover{filter:brightness(1.1)}
   .chat-header button.invalid-btn{color:var(--danger);border-color:rgba(239,68,68,.5)}
   .chat-header button.invalid-btn:hover{background:rgba(239,68,68,.12)}
+  .chat-header button.ongoing-btn{color:#a78bfa;border-color:rgba(167,139,250,.5)}
+  .chat-header button.ongoing-btn:hover{background:rgba(167,139,250,.12)}
   .chat-header button.reopen-btn{border-color:var(--blue);color:var(--blue)}
   .chat-header button.reopen-btn:hover{background:var(--blue);color:#fff}
   .chat-header button:hover:not(.done-btn):not(.reopen-btn){background:var(--panel2)}
@@ -178,6 +182,11 @@
       <span class="name">In Progress</span>
       <span class="count" id="cProg">0</span>
     </button>
+    <button class="bucket-btn" data-bucket="on_going">
+      <span class="dot on_going"></span>
+      <span class="name">On Going</span>
+      <span class="count" id="cOnGoing">0</span>
+    </button>
     <button class="bucket-btn" data-bucket="done">
       <span class="dot done"></span>
       <span class="name">Done</span>
@@ -235,6 +244,7 @@
         </div>
         <div class="actions">
           <button class="reopen-btn" id="actReopen" style="display:none">↺ Reopen</button>
+          <button class="ongoing-btn" id="actOnGoing">⏳ On Going</button>
           <button class="invalid-btn" id="actInvalid">⚠ Invalid</button>
           <button class="done-btn" id="actDone">✓ Done / Resolved</button>
         </div>
@@ -276,7 +286,7 @@ function apiFetch(path, opts = {}) {
 function showApiErr(msg) { $('#apiErrBanner').textContent = msg; $('#apiErrBanner').style.display = 'block'; }
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 2500); }
 
-const bucketLabels = { after_blast:'After Blast', open:'Open', in_progress:'In Progress', done:'Done', invalid:'Invalid' };
+const bucketLabels = { after_blast:'After Blast', open:'Open', in_progress:'In Progress', on_going:'On Going', done:'Done', invalid:'Invalid' };
 
 async function loadMe() {
   try {
@@ -315,6 +325,7 @@ async function loadThreads() {
     $('#cAfterBlast').textContent = r.counts.after_blast || 0;
     $('#cOpen').textContent = r.counts.open || 0;
     $('#cProg').textContent = r.counts.in_progress || 0;
+    $('#cOnGoing').textContent = r.counts.on_going || 0;
     $('#cDone').textContent = r.counts.done || 0;
     $('#cInvalid').textContent = r.counts.invalid || 0;
 
@@ -404,9 +415,11 @@ async function loadMessages(scrollBottom) {
     // Action buttons & reply lock. done/invalid = terminal (terkunci, bisa Reopen).
     const replyBox = $('#replyBox');
     const terminal = (r.status === 'done' || r.status === 'invalid');
+    const ongoing = (r.status === 'on_going');
     if (terminal) {
       $('#actDone').style.display = 'none';
       $('#actInvalid').style.display = 'none';
+      $('#actOnGoing').style.display = 'none';
       $('#actReopen').style.display = '';
       replyBox.classList.add('locked');
       $('#replyText').placeholder = (r.status === 'invalid')
@@ -415,9 +428,11 @@ async function loadMessages(scrollBottom) {
     } else {
       $('#actDone').style.display = '';
       $('#actInvalid').style.display = '';
-      $('#actReopen').style.display = 'none';
+      // On Going tampil saat aktif; saat sudah on_going, ganti jadi Reopen (jalan keluar → Open)
+      $('#actOnGoing').style.display = ongoing ? 'none' : '';
+      $('#actReopen').style.display = ongoing ? '' : 'none';
       replyBox.classList.remove('locked');
-      $('#replyText').placeholder = 'Tulis balasan...';
+      $('#replyText').placeholder = ongoing ? 'Sedang divalidasi (On Going). Tulis balasan...' : 'Tulis balasan...';
     }
 
     const msgs = r.messages || [];
@@ -478,6 +493,23 @@ $('#actInvalid').addEventListener('click', async () => {
     loadThreads();
   } finally {
     $('#actInvalid').disabled = false;
+  }
+});
+
+// On Going — tandai nomor sedang divalidasi. Tidak kirim pesan. Keluar dari antrian
+// auto-retry (cron cuma proses after_blast + in_progress). Sticky sampai Done/Invalid/Reopen.
+$('#actOnGoing').addEventListener('click', async () => {
+  if (!currentPhone) return;
+  $('#actOnGoing').disabled = true;
+  try {
+    const fd = new FormData(); fd.append('status', 'on_going');
+    const r = await apiFetch(`/api/inbox/status?phone=${encodeURIComponent(currentPhone)}`, { method: 'POST', body: fd });
+    if (!r.ok) { alert('Gagal: ' + await r.text()); return; }
+    toast('⏳ Thread ditandai On Going (sedang divalidasi).');
+    await loadMessages(false);
+    loadThreads();
+  } finally {
+    $('#actOnGoing').disabled = false;
   }
 });
 

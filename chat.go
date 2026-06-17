@@ -242,9 +242,9 @@ UPDATE chat_threads SET
 	last_message_at = ?,
 	last_message_preview = ?,
 	last_message_direction = 'out',
-	status = CASE WHEN status IN ('done','invalid') THEN status ELSE 'in_progress' END,
-	assigned_email = CASE WHEN status IN ('done','invalid') THEN assigned_email ELSE ? END,
-	assigned_name = CASE WHEN status IN ('done','invalid') THEN assigned_name ELSE ? END,
+	status = CASE WHEN status IN ('done','invalid','on_going') THEN status ELSE 'in_progress' END,
+	assigned_email = CASE WHEN status IN ('done','invalid','on_going') THEN assigned_email ELSE ? END,
+	assigned_name = CASE WHEN status IN ('done','invalid','on_going') THEN assigned_name ELSE ? END,
 	updated_at = ?
 WHERE phone = ?`, tsStr, prev, agentEmail, agentName, tsStr, phone)
 	return err
@@ -263,7 +263,7 @@ UPDATE chat_threads SET
 	last_message_preview = ?,
 	last_message_direction = 'in',
 	unread_count = unread_count + 1,
-	status = CASE WHEN status IN ('done','invalid') THEN status ELSE 'open' END,
+	status = CASE WHEN status IN ('done','invalid','on_going') THEN status ELSE 'open' END,
 	updated_at = ?
 WHERE phone = ?`, tsStr, prev, tsStr, phone)
 	return err
@@ -341,16 +341,18 @@ func handleThreads(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// summary counts
-	var cAfter, cOpen, cProg, cDone, cInvalid, cUnread int
+	var cAfter, cOpen, cProg, cOnGoing, cDone, cInvalid, cUnread int
 	_ = auditDB.QueryRow(`SELECT COUNT(*) FROM chat_threads WHERE status = 'after_blast'`).Scan(&cAfter)
 	_ = auditDB.QueryRow(`SELECT COUNT(*) FROM chat_threads WHERE status = 'open'`).Scan(&cOpen)
 	_ = auditDB.QueryRow(`SELECT COUNT(*) FROM chat_threads WHERE status = 'in_progress'`).Scan(&cProg)
+	_ = auditDB.QueryRow(`SELECT COUNT(*) FROM chat_threads WHERE status = 'on_going'`).Scan(&cOnGoing)
 	_ = auditDB.QueryRow(`SELECT COUNT(*) FROM chat_threads WHERE status = 'done'`).Scan(&cDone)
 	_ = auditDB.QueryRow(`SELECT COUNT(*) FROM chat_threads WHERE status = 'invalid'`).Scan(&cInvalid)
 	_ = auditDB.QueryRow(`SELECT COALESCE(SUM(unread_count), 0) FROM chat_threads`).Scan(&cUnread)
 	totals["after_blast"] = cAfter
 	totals["open"] = cOpen
 	totals["in_progress"] = cProg
+	totals["on_going"] = cOnGoing
 	totals["done"] = cDone
 	totals["invalid"] = cInvalid
 	totals["unread"] = cUnread
@@ -454,15 +456,15 @@ func handleSetStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	status := r.FormValue("status")
-	if status != "open" && status != "in_progress" && status != "done" && status != "invalid" {
-		httpErr(w, 400, "status invalid (open|in_progress|done|invalid)")
+	if status != "open" && status != "in_progress" && status != "done" && status != "invalid" && status != "on_going" {
+		httpErr(w, 400, "status invalid (open|in_progress|done|invalid|on_going)")
 		return
 	}
 	user, _ := userFromCtx(r.Context())
 
-	// Kalau status in_progress, auto-assign ke user yang klik
+	// Kalau status in_progress / on_going, auto-assign ke user yang klik (PIC validasi)
 	var assignedEmail, assignedName sql.NullString
-	if status == "in_progress" {
+	if status == "in_progress" || status == "on_going" {
 		assignedEmail = sql.NullString{String: user.Email, Valid: true}
 		assignedName = sql.NullString{String: user.Name, Valid: true}
 	} else {
