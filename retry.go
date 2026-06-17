@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"net/http"
 	"os"
 	"strconv"
 	"sync"
@@ -51,15 +52,17 @@ func startRetryScheduler() {
 		ticker := time.NewTicker(time.Duration(retryIntervalMin) * time.Minute)
 		defer ticker.Stop()
 		for {
-			processRetries()
+			processRetries(false, 0)
 			<-ticker.C
 		}
 	}()
 }
 
 // processRetries — cek semua thread yang perlu retry, kirim attempt berikutnya.
+// force=true → lewati window-jam guard (dipakai endpoint manual /api/retry/run-now).
+// limit>0 → batasi jumlah thread yang diproses (mis. tes batch kecil dulu).
 // Lock supaya tidak double-run (kalau interval terlalu pendek dan batch besar).
-func processRetries() {
+func processRetries(force bool, limit int) {
 	retryMu.Lock()
 	if retryRunning {
 		retryMu.Unlock()
@@ -76,8 +79,9 @@ func processRetries() {
 
 	// Window guard: blast attempt hanya distart saat masuk jam window (WIB). Batch yang
 	// sudah jalan boleh lanjut lewat jam window (di-proteksi single-flight lock di atas).
+	// force=true (trigger manual) melewati guard ini.
 	now := time.Now().In(wibLoc)
-	if now.Hour() != retryWindowHour {
+	if !force && now.Hour() != retryWindowHour {
 		return
 	}
 
@@ -122,11 +126,19 @@ ORDER BY current_attempt DESC, last_attempt_at ASC`)
 	}
 	rows.Close()
 
+	if limit > 0 && len(batch) > limit {
+		batch = batch[:limit]
+	}
+
 	if len(batch) == 0 {
 		return
 	}
 
-	log.Printf("retry: window %02d:00 WIB — antrikan %d threads (after_blast + in_progress)", retryWindowHour, len(batch))
+	mode := fmt.Sprintf("window %02d:00 WIB", retryWindowHour)
+	if force {
+		mode = "FORCE (manual)"
+	}
+	log.Printf("retry: %s — antrikan %d threads (after_blast + in_progress)", mode, len(batch))
 
 	sent, failed := 0, 0
 	for i, r := range batch {
@@ -240,6 +252,30 @@ func atoiEnv(key string, def int) int {
 		return def
 	}
 	return n
+}
+
+// handleRetryRunNow — trigger MANUAL: jalankan batch retry sekarang juga, lewati
+// guard window-jam. Query opsional ?limit=N untuk batasi jumlah (mis. tes batch kecil).
+// Tetap hormati: WA harus connected, attempt<3, belum dikirimi hari ini, jitter 20-40s.
+func handleRetryRunNow(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	_, loggedIn, connected := state.snapshot()
+	if !loggedIn || !connected {
+		httpErr(w, 400, "WhatsApp belum terhubung — tidak ada yang dikirim.")
+		return
+	}
+	limit := 0
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	go processRetries(true, limit)
+	log.Printf("retry: FORCE dipicu manual via API (limit=%d)", limit)
+	writeJSON(w, map[string]any{"ok": true, "started": true, "limit": limit})
 }
 
 // avoid unused

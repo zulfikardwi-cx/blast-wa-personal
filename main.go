@@ -122,6 +122,7 @@ func main() {
 	mux.HandleFunc("/api/export-sheet", corsMiddleware(requireAuth(handleExportSheet)))
 
 	mux.HandleFunc("/api/templates", corsMiddleware(requireAuth(handleTemplates)))
+	mux.HandleFunc("/api/retry/run-now", corsMiddleware(requireAuth(handleRetryRunNow)))
 
 	// Report belum-respons (sudah di-blast 2/3x tapi nomor tidak pernah membalas)
 	mux.HandleFunc("/api/report/unresponsive", corsMiddleware(requireAuth(handleReportUnresponsive)))
