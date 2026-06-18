@@ -14,9 +14,12 @@ function blank(s) {
 
 // ---- write helpers ----
 
+// recordChatMessage — return jumlah baris yang BENAR-BENAR di-insert (1 = baru, 0 = sudah
+// ada / di-ignore karena wa_message_id duplikat). Dipakai untuk gate update thread supaya
+// pesan dobel (event live + backfill saat reconnect) tidak menambah unread/last_message 2x.
 function recordChatMessage(phone, direction, body, mediaType, waMsgID, ts, blastID, senderEmail, senderName) {
   const isMedia = mediaType ? 1 : 0;
-  db.prepare(
+  const info = db.prepare(
     `INSERT OR IGNORE INTO chat_messages
        (phone, direction, body, is_media, media_type, wa_message_id, timestamp, blast_log_id, sender_email, sender_name)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -32,6 +35,7 @@ function recordChatMessage(phone, direction, body, mediaType, waMsgID, ts, blast
     blank(senderEmail),
     blank(senderName)
   );
+  return info.changes;
 }
 
 function isPhoneBlasted(phone) {
@@ -108,16 +112,22 @@ function upsertThreadIncoming(phone, preview, ts) {
 
 // ---- incoming (dipanggil wa.js) ----
 
+// handleIncoming — dipanggil untuk pesan masuk, baik live (event message) MAUPUN
+// backfill saat reconnect. Update thread (unread/last_message/status) HANYA kalau pesan
+// benar-benar baru (recordChatMessage return 1), supaya pesan yang sudah tercatat tidak
+// di-hitung ulang. Inilah yang membuat chat yang masuk saat service OFF ikut muncul saat
+// service ON: backfill mengumpankan pesan terlewat, yang baru tersimpan & menggerakkan thread.
 function handleIncoming({ phone, body, mediaType, waMessageId, timestamp }) {
   if (!isPhoneBlasted(phone)) {
-    console.log('  → skip incoming: phone', phone, 'belum pernah di-blast');
-    return;
+    return; // bukan nomor yang pernah di-blast → abaikan (tidak masuk inbox)
   }
+  let inserted = 1;
   try {
-    recordChatMessage(phone, 'in', body, mediaType, waMessageId, timestamp, 0, '', '');
+    inserted = recordChatMessage(phone, 'in', body, mediaType, waMessageId, timestamp, 0, '', '');
   } catch (e) {
     console.log('warn: recordChatMessage incoming:', e.message);
   }
+  if (!inserted) return; // sudah pernah tercatat (event dobel / backfill ulang) → stop
   try {
     upsertThreadIncoming(phone, body, timestamp);
   } catch (e) {

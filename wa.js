@@ -19,10 +19,14 @@ const state = {
 
 let client = null;
 let incomingHandler = null; // di-set server.js → chat.handleIncoming
+let blastedCheck = null; // di-set server.js → chat.isPhoneBlasted (filter backfill)
 let reinitTimer = null;
 
 function setIncomingHandler(fn) {
   incomingHandler = fn;
+}
+function setBlastedCheck(fn) {
+  blastedCheck = fn;
 }
 
 function buildClient() {
@@ -67,6 +71,11 @@ function buildClient() {
     state.connected = true;
     state.qr = '';
     console.log('connected (ready)');
+    // Backfill pesan yang masuk selagi service OFF. Delay 15 dtk supaya WA selesai sync
+    // dulu, lalu tarik pesan terlewat dari tiap chat ter-blast.
+    setTimeout(() => {
+      backfillMissed().catch((e) => console.log('backfill error:', e.message));
+    }, 15000);
   });
 
   c.on('disconnected', (reason) => {
@@ -223,6 +232,57 @@ async function handleIncomingWA(msg) {
   }
 }
 
+// backfillMissed — saat reconnect (ready), tarik pesan terlewat dari tiap chat personal
+// yang pernah di-blast, umpankan ke incomingHandler. Yang sudah tercatat di-skip otomatis
+// (dedup wa_message_id), yang baru (masuk selagi service OFF) tersimpan & muncul di Inbox.
+async function backfillMissed() {
+  if (!incomingHandler) return;
+  let chats;
+  try {
+    chats = await client.getChats();
+  } catch (e) {
+    console.log('backfill: getChats gagal:', e.message);
+    return;
+  }
+  let scanned = 0;
+  let fed = 0;
+  for (const chat of chats) {
+    try {
+      if (chat.isGroup) continue;
+      const cid = (chat.id && chat.id._serialized) || '';
+      let phone = '';
+      if (cid.endsWith('@c.us')) {
+        phone = digitsOnly(cid.replace('@c.us', ''));
+      } else if (cid.endsWith('@lid')) {
+        const r = await client.getContactLidAndPhone([cid]);
+        if (r && r[0] && r[0].pn) phone = digitsOnly(r[0].pn.replace('@c.us', ''));
+      }
+      if (!phone) continue;
+      // hanya nomor yang pernah di-blast (hindari fetch chat lain yang tidak relevan)
+      if (blastedCheck && !blastedCheck(phone)) continue;
+
+      const msgs = await chat.fetchMessages({ limit: 30 });
+      for (const m of msgs) {
+        if (m.fromMe) continue;
+        const { body, mediaType } = extractIncoming(m);
+        const ts = m.timestamp ? new Date(m.timestamp * 1000) : new Date();
+        incomingHandler({
+          phone,
+          body,
+          mediaType,
+          waMessageId: (m.id && m.id.id) || '',
+          timestamp: ts,
+        });
+        fed++;
+      }
+      scanned++;
+    } catch (_) {
+      // skip chat yang error
+    }
+  }
+  console.log(`backfill selesai: ${scanned} chat ter-blast dicek, ${fed} pesan diumpankan (hanya yang baru yang tersimpan)`);
+}
+
 module.exports = {
   init,
   snapshot,
@@ -231,4 +291,5 @@ module.exports = {
   sendText,
   logout,
   setIncomingHandler,
+  setBlastedCheck,
 };

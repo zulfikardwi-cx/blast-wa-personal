@@ -30,6 +30,8 @@ async function main() {
 
   // WA incoming → inbox state machine
   wa.setIncomingHandler(chat.handleIncoming);
+  // filter backfill: hanya tarik ulang chat dari nomor yang pernah di-blast
+  wa.setBlastedCheck(chat.isPhoneBlasted);
 
   // Init WA di background (jangan blok start server — QR muncul di log/endpoint)
   wa.init().catch((e) => console.log('wa init error:', e.message));
