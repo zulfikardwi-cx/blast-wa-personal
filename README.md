@@ -1,72 +1,74 @@
-# Blast WA Personal
+# Blast WA Personal — STAGING (Node.js)
 
-Web tool blast WhatsApp ke nomor pribadi untuk tim majoo, dengan login Google `@majoo.id` dan audit log per blast.
+> Branch `staging`. Migrasi infrastruktur dari **Go + whatsmeow** → **Node.js + whatsapp-web.js**.
+> Branch `main` (produksi Go di Mac Mini) TIDAK disentuh dan tetap jalan seperti biasa.
 
-**Arsitektur split:**
-- **Frontend** → GitHub Pages (`docs/`) — tim akses lewat URL GitHub
-- **Backend** → Go + whatsmeow di Mac, expose via Cloudflare Tunnel — backend wajib jalan karena whatsmeow butuh proses persisten ke WhatsApp
+Web tool blast WhatsApp + Inbox follow-up untuk tim majoo, login Google `@majoo.id`, audit log, retry terjadwal, dan export Google Sheets.
 
-```
-┌─ Frontend (GitHub Pages) ─────────┐    ┌─ Backend (Mac + Tunnel) ──────┐
-│ https://<user>.github.io/blast-…  │ ── │ https://blast-wa-api.majoo.id │
-│ • docs/index.html, login.html     │    │ • Go + whatsmeow              │
-│ • docs/config.js → API_BASE       │    │ • OAuth callback              │
-│ • docs/assets/logo                │    │ • SQLite audit log            │
-└───────────────────────────────────┘    └───────────────────────────────┘
-```
+## Apa yang berubah dari versi Go
+
+| Aspek | Lama (main) | Sekarang (staging) |
+|---|---|---|
+| Bahasa | Go | Node.js (CommonJS) |
+| Library WA | whatsmeow (protokol langsung) | whatsapp-web.js (Puppeteer + Chromium) |
+| Sesi WA | `session/store.db` (SQLite whatsmeow) | folder LocalAuth `.wwebjs_auth/` (sesi browser) |
+| LID handling | manual (`resolveToLID`, `GetLIDForPN`) | otomatis oleh whatsapp-web.js (`getNumberId`) |
+| HTTP | `net/http` stdlib | Express |
+| DB bisnis | `session/audit.db` | sama (`session/audit.db`, skema identik via better-sqlite3) |
+| Frontend `docs/` | sama | sama (tidak berubah, kecuali `config.js`) |
+
+> **Sesi tidak bisa dimigrasi**: LocalAuth ≠ store.db. Staging WAJIB scan QR baru (pakai nomor sender staging terpisah).
 
 ## Stack
 
-- **Backend:** Go + [whatsmeow](https://github.com/tulir/whatsmeow), `net/http` stdlib, SQLite
-- **Auth:** Google OAuth 2.0, domain check `@majoo.id`, HMAC-signed session cookie (SameSite=None+Secure di produksi untuk cross-site)
-- **Frontend:** vanilla JS, brand colors majoo (teal `#2DBDB6` → lime `#9ACF87`)
-- **CORS:** allowlist per env via `ALLOWED_ORIGINS`
+- **Backend:** Node.js ≥18, Express, [whatsapp-web.js](https://github.com/pedroslopez/whatsapp-web.js), better-sqlite3
+- **Auth:** Google OAuth 2.0 (`google-auth-library`), domain `@majoo.id`, cookie HMAC-SHA256 (skema identik versi Go), TTL 7 hari
+- **Sheets:** `googleapis` + service account
+- **Scheduler retry:** window jam-9 WIB (`luxon`, zona `Asia/Jakarta`)
 
-## Struktur repo
+## Struktur (branch staging)
 
 ```
 .
-├── docs/                      # ← GitHub Pages root (Settings → Pages → /docs)
-│   ├── index.html             # Main app, fetch ke API_BASE
-│   ├── login.html             # Halaman login (link ke backend OAuth)
-│   ├── config.js              # window.APP_CONFIG.API_BASE — edit URL backend di sini
-│   └── assets/majoo-logo.svg
-├── static/                    # Fallback (served oleh backend kalau Pages down)
-├── main.go, auth.go, audit.go, blast.go
-├── go.mod, go.sum
-├── .env.example               # Template config
-├── .env                       # (gitignored — secrets)
-├── session/                   # (gitignored — WA session + audit DB)
-└── sample.csv
+├── server.js        # bootstrap Express + routes (port main.go)
+├── wa.js            # layer whatsapp-web.js (QR/connect/send/incoming, auto re-init)
+├── db.js            # better-sqlite3 + skema identik
+├── auth.js          # OAuth + cookie HMAC + CORS
+├── blast.js         # CSV + job blast attempt-1 + progress
+├── chat.js          # Inbox 7-bucket state machine + handlers
+├── templates.js     # 3 attempt template + closing
+├── retry.js         # scheduler window jam-9 + manual run/preview
+├── report.js        # report "Belum Respons"
+├── sheets.js        # export Blast Log + sync team
+├── util.js          # normalizePhone, render, dll
+├── audit.js         # blast_logs / blast_recipients + history
+├── docs/            # frontend (sama; config.js → API_BASE)
+├── package.json
+├── .env.staging.example   # → copy ke .env
+└── session/         # (gitignored) audit.db
 ```
 
-## Setup lengkap — lihat [DEPLOY.md](DEPLOY.md)
-
-Untuk first-time deployment dari nol (GCP OAuth, Cloudflare Tunnel, GitHub Pages enable), ikuti DEPLOY.md step-by-step.
-
-## Quick reference
-
-### Run backend lokal (untuk dev)
+## Jalankan lokal (di mesin staging)
 
 ```bash
-cp .env.example .env       # isi credentials
-go build -o blast-wa-personal ./...
-./blast-wa-personal
+cp .env.staging.example .env     # isi kredensial staging
+npm install                      # build better-sqlite3 + unduh Chromium (puppeteer)
+npm start                        # node server.js
 ```
 
-### Run produksi (Mac always-on)
+Buka `http://localhost:8080`, login `@majoo.id`, lalu scan QR (muncul di terminal **dan** di UI via `/api/qr`) pakai **nomor sender staging**.
 
-Tab 1:
-```bash
-./blast-wa-personal
-```
+Deploy ke mesin terpisah + Cloudflare Tunnel + pm2: lihat [DEPLOY.md](DEPLOY.md).
 
-Tab 2:
-```bash
-cloudflared tunnel run blast-wa
-```
+## Inbox state machine (7 bucket — identik versi Go)
 
-### Format CSV
+`after_blast` (blast attempt-1) → `open` (user balas) → `in_progress` (agent balas) ; `on_going` (manual, sticky) ; `force_close` (auto setelah attempt-3 no-response) ; `done` (locked + closing) ; `invalid` (locked). `done`/`invalid`/`on_going` mengunci status dari incoming/agent-reply.
+
+## Retry
+
+Tiap hari saat jam `RETRY_WINDOW_HOUR` (WIB), proses antrian "Belum Respons" (after_blast + in_progress, attempt<3), max 1×/hari per nomor. **Default staging `RETRY_ENABLED=false`** (auto-cron mati) — pakai tombol manual "Run Blast Attempt" / `POST /api/retry/run-now` untuk uji terkontrol.
+
+## Format CSV
 
 ```csv
 phone,nama_outlet,nomer_invoice
@@ -74,38 +76,13 @@ phone,nama_outlet,nomer_invoice
 628111234567,Warung Mie Bu Sari,INV-2026-0002
 ```
 
-- `phone` auto-normalize `0…` → `62…`
-- Nomor non-WA ditandai `failed: nomor tidak terdaftar di WhatsApp`
+`phone` auto-normalize `0…`/`8…` → `62…`. Nomor non-WA → `failed: nomor tidak terdaftar di WhatsApp`.
 
-## Endpoints (backend)
+## Endpoints (paritas dengan versi Go)
 
-| Method | Path             | Auth | CORS | Keterangan                                |
-|--------|------------------|------|------|-------------------------------------------|
-| GET    | `/auth/login`    | —    | —    | Redirect ke Google OAuth                  |
-| GET    | `/auth/callback` | —    | —    | Callback, set cookie, redirect ke FRONTEND_URL |
-| POST   | `/auth/logout`   | —    | —    | Clear cookie                              |
-| GET    | `/api/me`        | —    | ✅   | Current user (null kalau belum login)     |
-| GET    | `/api/status`    | ✅   | ✅   | `{loggedIn, connected, hasQR}`            |
-| GET    | `/api/qr`        | ✅   | ✅   | QR string                                 |
-| POST   | `/api/blast`     | ✅   | ✅   | multipart: template, csv, min/max_delay   |
-| GET    | `/api/progress`  | ✅   | ✅   | Snapshot job terkini                      |
-| GET    | `/api/history`   | ✅   | ✅   | 100 audit logs terakhir                   |
+Auth: `GET /auth/login`, `GET /auth/callback`, `/auth/logout`.
+API (semua butuh login, kecuali `/api/me`): `/api/me`, `/api/status`, `/api/qr`, `POST /api/logout`, `POST /api/blast`, `/api/progress`, `/api/history`, `/api/sheet-status`, `POST /api/export-sheet`, `/api/templates`, `/api/retry/preview`, `POST /api/retry/run-now`, `/api/report/unresponsive(.csv)`, `POST /api/report/export-sheet`, `/api/inbox/{threads,messages,read,status,reply,resolve,sync-teams}`.
 
-## Keamanan
+## ⚠️ Risiko ban — tetap berlaku
 
-- **Session cookie**: HttpOnly, HMAC-signed dengan `SESSION_SECRET`. SameSite=None+Secure saat HTTPS (untuk cross-site dari Pages), Lax saat dev lokal HTTP. TTL 7 hari.
-- **CORS**: hanya origin di `ALLOWED_ORIGINS` yang di-allow + credentials.
-- **Domain check**: `@majoo.id` divalidasi di server (suffix check + `hd` param Google).
-- **Audit log immutable dari UI**: hanya endpoint read; insert/update internal saat blast jalan.
-
-## Anti-banned
-
-- Default delay 6–14 detik random. Jangan turun di bawah 4.
-- Batasi 100–200 nomor/hari per session WA.
-- Variasikan template antar campaign.
-- Sertakan opt-out (`Balas STOP`) + honor manual.
-
-## Catatan
-
-- Standalone — belum integrate ke Inbox Chat Dashboard Enterprise. Reply masuk perlu dipantau manual di HP sender.
-- Audit per-recipient belum disimpan (cuma summary).
+whatsapp-web.js **juga unofficial**. Migrasi ini TIDAK menghilangkan risiko ban (insiden `error 463` di versi Go). Pertahankan jitter konservatif, volume rendah, dan pertimbangkan strategi inbound-first / WA Cloud API resmi untuk produksi luas.

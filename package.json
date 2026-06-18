@@ -1,0 +1,25 @@
+{
+  "name": "blast-wa-personal",
+  "version": "2.0.0-staging",
+  "description": "Blast WA Personal — staging (Node.js + whatsapp-web.js). Migrasi dari Go + whatsmeow.",
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "google-auth-library": "^9.15.1",
+    "googleapis": "^144.0.0",
+    "luxon": "^3.5.0",
+    "multer": "^2.2.0",
+    "qrcode-terminal": "^0.12.0",
+    "whatsapp-web.js": "^1.26.0"
+  }
+}

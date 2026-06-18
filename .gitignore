@@ -8,9 +8,17 @@ uploads/
 *.db
 *.db-journal
 
-# Compiled binary (28MB) — user build sendiri
+# Compiled binary lama (Go) — sudah tidak dipakai di branch staging
 blast-wa-personal
 bin/
+
+# Node
+node_modules/
+npm-debug.log*
+
+# whatsapp-web.js LocalAuth session (folder browser) — JANGAN commit
+.wwebjs_auth/
+.wwebjs_cache/
 
 # OS / editor
 .DS_Store

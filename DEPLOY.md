@@ -1,466 +1,87 @@
-# Deploy Guide — Step by Step
+# Deploy Guide — STAGING (Node.js + whatsapp-web.js)
 
-Total waktu: **60–90 menit** untuk first-time. Subsequent updates: **5 menit** (git push, frontend auto-deploy).
+Panduan deploy environment **staging** ke **mesin terpisah** dari produksi (Mac Mini Go).
+Claude tidak punya akses mesin staging — langkah ini dijalankan user.
 
-Urutan langkah penting — **jangan loncat**, karena URL OAuth callback dan CORS origins saling tergantung.
+## Prasyarat mesin staging
 
----
+- **Node.js ≥ 18** (disarankan 20/22). Cek: `node -v`.
+- **Chromium** untuk Puppeteer (whatsapp-web.js). Butuh ~300–500 MB RAM per sesi.
+  - **macOS**: `npm install` otomatis mengunduh Chromium milik Puppeteer — tidak perlu apa-apa lagi. (Atau set `PUPPETEER_EXECUTABLE_PATH` ke Google Chrome yang sudah ada.)
+  - **Linux (VPS)**: pasang dependensi system Chromium dulu, mis. (Debian/Ubuntu):
+    ```bash
+    sudo apt-get update && sudo apt-get install -y \
+      ca-certificates fonts-liberation libasound2 libatk-bridge2.0-0 libatk1.0-0 \
+      libcups2 libdbus-1-3 libdrm2 libgbm1 libgtk-3-0 libnspr4 libnss3 \
+      libx11-xcb1 libxcomposite1 libxdamage1 libxrandr2 libxshmfence1 wget
+    ```
+    Kalau Puppeteer gagal unduh Chromium, pasang `chromium` system lalu set `PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium`.
+- **git**, dan akun GitHub yang bisa akses repo `zulfikardwi-cx/blast-wa-personal`.
 
-## Overview urutan setup
+## Langkah
 
-```
-1. Persiapan tools           (10 menit)
-2. Buat repo GitHub           (5 menit)
-3. Setup Google OAuth         (15 menit)
-4. Setup Cloudflare Tunnel    (15 menit)
-5. Isi .env & test backend    (5 menit)
-6. Enable GitHub Pages        (5 menit)
-7. Edit config.js & push      (5 menit)
-8. Smoke test end-to-end      (5 menit)
-```
-
----
-
-## 1. Persiapan tools (10 menit)
-
-### 1.1. Cek prerequisites
-
+### 1. Clone + checkout branch staging
 ```bash
-go version          # harus go1.22+
-brew --version
-git --version
-gh --version        # GitHub CLI — install kalau belum: brew install gh
+git clone https://github.com/zulfikardwi-cx/blast-wa-personal.git
+cd blast-wa-personal
+git checkout staging
+npm install      # build better-sqlite3 + unduh Chromium (beberapa menit)
 ```
 
-Install yang missing:
+### 2. Konfigurasi `.env`
 ```bash
-brew install go git gh cloudflared
+cp .env.staging.example .env
+openssl rand -hex 32     # → tempel ke SESSION_SECRET (baru, beda dari produksi)
 ```
+Isi minimal: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `OAUTH_REDIRECT_URL`, `SESSION_SECRET`.
+Untuk Sheets (opsional): taruh `service-account.json` di folder project, set `GSHEET_SPREADSHEET_ID` ke **spreadsheet staging terpisah** (jangan pakai sheet produksi), dan beri akses Editor ke email service account.
 
-### 1.2. Generate session secret (catat output-nya, dipakai di step 5)
+> Biarkan `RETRY_ENABLED=false` di staging (default). Auto-cron jam-9 mati → cegah burst yang memicu ban. Uji pakai tombol manual.
 
+### 3. Cloudflare Tunnel (staging, terpisah)
+Jalankan tunnel ke port app (default 8080), mis. quick tunnel:
 ```bash
-openssl rand -hex 32
+cloudflared tunnel --url http://localhost:8080
 ```
+Catat URL `https://<random>.trycloudflare.com` (atau named tunnel sendiri kalau sudah ada akses).
+Lalu **sinkronkan 2 tempat**:
+- `.env` → `OAUTH_REDIRECT_URL=https://<tunnel-staging>/auth/callback`
+- `docs/config.js` → `API_BASE: "https://<tunnel-staging>"` (harus sama host dengan halaman → same-origin)
 
-Contoh output: `a1b2c3d4e5f6...9z0a` (64 char hex).
+### 4. Google OAuth redirect URI
+Di GCP → APIs & Services → Credentials → OAuth client (boleh client yang sama dengan produksi):
+tambahkan ke **Authorized redirect URIs**:
+- `https://<tunnel-staging>/auth/callback`
+- (opsional dev lokal) `http://localhost:8080/auth/callback`
 
-### 1.3. Login GitHub CLI
-
+### 5. Jalankan dengan pm2 (auto-restart)
 ```bash
-gh auth login
+npm install -g pm2
+pm2 start server.js --name blast-wa-staging
+pm2 logs blast-wa-staging         # lihat QR untuk discan
+pm2 save                          # (opsional) + pm2 startup untuk auto-boot
 ```
+Scan QR (muncul di `pm2 logs` **dan** di UI saat status "Scan QR") pakai **nomor sender staging** (bukan nomor produksi).
 
-Pilih: GitHub.com → HTTPS → Login with web browser → ikuti instruksi.
+### 6. Verifikasi
+Buka URL tunnel staging → login `@majoo.id` → status "WA Connected" → uji blast 1–2 nomor test (lihat checklist di bawah).
 
-Verify:
+## Update berikutnya
 ```bash
-gh auth status
+git pull && npm install && pm2 restart blast-wa-staging
 ```
-
----
-
-## 2. Buat repo GitHub (5 menit)
-
-### 2.1. Masuk ke folder project
-
-```bash
-cd "/Users/m1/Documents/Claude/Projects/Blast WA Personal"
-```
-
-### 2.2. Verifikasi tidak ada secret yang akan ke-commit
-
-```bash
-cat .gitignore     # pastikan ada: .env, session/, *.db
-ls -la .env        # file ini ADA (dari setup sebelumnya) tapi WAJIB ignored
-```
-
-### 2.3. Init git + first commit
-
-```bash
-git init
-git branch -m main
-git add .gitignore .env.example README.md DEPLOY.md
-git add go.mod go.sum main.go auth.go audit.go blast.go
-git add docs/ static/ sample.csv
-git status                                # double-check: .env, session/, *.db TIDAK ada
-git commit -m "Initial commit: blast WA personal with GitHub Pages + OAuth"
-```
-
-**Penting**: cek `git status` sebelum commit — kalau `.env` atau `session/store.db` muncul di staging, **STOP** dan benarkan gitignore.
-
-### 2.4. Create repo di GitHub & push
-
-```bash
-gh repo create blast-wa-personal --public --source=. --remote=origin --push
-```
-
-Output akan tampilkan URL repo, mis. `https://github.com/zulfikardwnsyh19/blast-wa-personal`.
-
-**Catat USERNAME GitHub Anda** (mis. `zulfikardwnsyh19`) — dipakai di step 3 untuk URL Pages.
-
----
-
-## 3. Setup Google OAuth (15 menit)
-
-### 3.1. Buka GCP Console
-
-https://console.cloud.google.com/ → login pakai akun majoo atau pribadi.
-
-### 3.2. Create project
-
-Pojok kiri atas → klik dropdown project → **NEW PROJECT**.
-- Name: `blast-wa-personal`
-- Organization: pilih `majoo.id` kalau ada akses, atau skip
-- **CREATE** → tunggu ~10 detik → **pilih project** baru di dropdown
-
-### 3.3. OAuth consent screen
-
-Sidebar → **APIs & Services** → **OAuth consent screen**.
-
-- **User Type**: pilih **Internal** (kalau project di org majoo) atau **External** (kalau personal)
-- **CREATE**
-
-Isi form:
-
-| Field | Value |
-|---|---|
-| App name | `Blast WA Personal` |
-| User support email | email Anda |
-| Authorized domains | klik +ADD DOMAIN → `majoo.id` |
-| Developer contact email | email Anda |
-
-**SAVE AND CONTINUE**.
-
-**Scopes**: klik **ADD OR REMOVE SCOPES** → centang `openid`, `userinfo.email`, `userinfo.profile` → **UPDATE** → **SAVE AND CONTINUE**.
-
-**Test users** (kalau pilih External): tambah email Anda + 2-3 tim untuk testing → **SAVE**.
-
-**BACK TO DASHBOARD**.
-
-### 3.4. Create OAuth Client ID
-
-Sidebar → **Credentials** → **+ CREATE CREDENTIALS** → **OAuth client ID**.
-
-- **Application type**: Web application
-- **Name**: `Blast WA Personal — Web`
-- **Authorized redirect URIs** → klik **+ ADD URI** dan tambah **DUA** URI:
-  ```
-  http://localhost:8080/auth/callback
-  https://blast-wa-api.majoo.id/auth/callback
-  ```
-
-**CREATE**.
-
-### 3.5. Catat credentials
-
-Popup tampilkan **Client ID** + **Client Secret**. **CATAT KEDUANYA** — secret tidak bisa dilihat ulang.
-
----
-
-## 4. Setup Cloudflare Tunnel (15 menit)
-
-> **Prasyarat**: Anda atau tim infra harus punya akses dashboard Cloudflare untuk domain `majoo.id`. Kalau tidak, koordinasi dulu.
-
-### 4.1. Login cloudflared
-
-```bash
-cloudflared tunnel login
-```
-
-Browser kebuka → pilih domain `majoo.id` → **Authorize**. Cert tersimpan di `~/.cloudflared/cert.pem`.
-
-### 4.2. Create tunnel
-
-```bash
-cloudflared tunnel create blast-wa
-```
-
-Output: `Created tunnel blast-wa with id <UUID>` dan path credentials JSON. **Catat UUID**.
-
-### 4.3. Buat config tunnel
-
-```bash
-nano ~/.cloudflared/config.yml
-```
-
-Isi (ganti `<UUID>` dengan yang dari step 4.2):
-
-```yaml
-tunnel: <UUID>
-credentials-file: /Users/m1/.cloudflared/<UUID>.json
-
-ingress:
-  - hostname: blast-wa-api.majoo.id
-    service: http://localhost:8080
-  - service: http_status:404
-```
-
-Save: `Ctrl+O` → Enter → `Ctrl+X`.
-
-### 4.4. Route DNS
-
-```bash
-cloudflared tunnel route dns blast-wa blast-wa-api.majoo.id
-```
-
-Verifikasi di Cloudflare dashboard → DNS → CNAME `blast-wa-api` ke `<UUID>.cfargotunnel.com` muncul.
-
----
-
-## 5. Isi `.env` & test backend (5 menit)
-
-### 5.1. Copy & edit `.env`
-
-```bash
-cd "/Users/m1/Documents/Claude/Projects/Blast WA Personal"
-cp .env.example .env
-nano .env
-```
-
-Isi (ganti dengan nilai dari step sebelumnya — `<USERNAME>` = GitHub username Anda dari step 2.4):
-
-```bash
-GOOGLE_CLIENT_ID=<dari step 3.5>
-GOOGLE_CLIENT_SECRET=<dari step 3.5>
-OAUTH_REDIRECT_URL=https://blast-wa-api.majoo.id/auth/callback
-SESSION_SECRET=<dari step 1.2>
-FRONTEND_URL=https://<USERNAME>.github.io/blast-wa-personal
-ALLOWED_ORIGINS=https://<USERNAME>.github.io
-```
-
-Save & tutup.
-
-### 5.2. Build & jalankan
-
-Tab terminal 1 — backend:
-```bash
-go build -o blast-wa-personal ./...
-./blast-wa-personal
-```
-
-Tab terminal 2 — tunnel:
-```bash
-cloudflared tunnel run blast-wa
-```
-
-### 5.3. Smoke test backend
-
-```bash
-curl -i https://blast-wa-api.majoo.id/api/me
-# Harus return: 200 OK, body {"user":null}
-```
-
-Kalau dapat:
-- **Connection refused** → tunnel tidak jalan / backend mati
-- **Error 1033** → tunnel belum stable, tunggu 30 detik
-- **404 / SSL error** → DNS belum propagate, tunggu 1-2 menit
-
----
-
-## 6. Enable GitHub Pages (5 menit)
-
-### 6.1. Buka repo settings
-
-Browser → `https://github.com/<USERNAME>/blast-wa-personal/settings/pages`.
-
-### 6.2. Konfigurasi source
-
-- **Source**: Deploy from a branch
-- **Branch**: `main` / `/docs`
-- **SAVE**
-
-GitHub akan build & deploy. Tunggu ~30-60 detik.
-
-### 6.3. Cek URL Pages
-
-Refresh halaman → muncul banner hijau:
-> Your site is live at `https://<USERNAME>.github.io/blast-wa-personal/`
-
-Buka URL itu di browser. **Halaman akan blank dulu** atau redirect ke login — wajar, karena `config.js` masih point ke URL placeholder. Lanjut step 7.
-
----
-
-## 7. Edit `docs/config.js` & push (5 menit)
-
-### 7.1. Edit config.js
-
-```bash
-nano docs/config.js
-```
-
-Pastikan `API_BASE` benar (sesuai backend Cloudflare Tunnel):
-
-```js
-window.APP_CONFIG = {
-  API_BASE: "https://blast-wa-api.majoo.id",
-};
-```
-
-Save.
-
-### 7.2. Commit & push
-
-```bash
-git add docs/config.js
-git commit -m "Set API_BASE to production backend"
-git push
-```
-
-GitHub Pages otomatis rebuild dalam ~30-60 detik.
-
----
-
-## 8. Smoke test end-to-end (5 menit)
-
-### 8.1. Buka URL frontend
-
-`https://<USERNAME>.github.io/blast-wa-personal/`
-
-- Harus redirect otomatis ke `login.html`
-- Logo majoo muncul
-- Tombol "Sign in with Google" enabled
-
-### 8.2. Test login
-
-Klik **Sign in with Google** → pilih akun `@majoo.id` → consent.
-
-Flow yang terjadi:
-1. Browser → `https://blast-wa-api.majoo.id/auth/login`
-2. Backend redirect ke Google
-3. Google → `https://blast-wa-api.majoo.id/auth/callback?code=...`
-4. Backend set cookie + redirect ke `FRONTEND_URL`
-5. Browser landing di `https://<USERNAME>.github.io/blast-wa-personal/` dengan cookie aktif
-6. `index.html` → fetch `/api/me` (cross-site dengan credentials) → tampilkan user
-
-Kalau ada error:
-
-| Gejala | Solusi |
-|---|---|
-| Tombol login tidak respond | `config.js` belum di-push / Pages belum rebuild. Hard refresh (Cmd+Shift+R). |
-| Google "redirect_uri_mismatch" | URI di GCP (step 3.4) tidak persis sama dengan `OAUTH_REDIRECT_URL` di `.env`. |
-| "Akses ditolak. Hanya email @majoo.id" | Login pakai email selain majoo.id. |
-| Redirect ke Pages tapi `/api/me` return user:null | Cookie tidak ter-set cross-site. Cek: backend HTTPS aktif (cookie Secure butuh HTTPS), `ALLOWED_ORIGINS` cover Pages URL. |
-| `/api/me` CORS error di console | Origin Anda tidak match `ALLOWED_ORIGINS`. Cek URL exact (https vs http, trailing slash). |
-| `/api/status` 401 di console | Cookie tidak terkirim. Browser block third-party cookies → cek setting browser, atau pakai browser yang allow cross-site cookies. |
-
-### 8.3. Pairing WhatsApp & blast test
-
-1. Setelah login, scan QR di card "Koneksi WhatsApp" (Linked Devices di HP)
-2. Upload `sample.csv` (sudah ada di repo)
-3. **Edit row pertama** dengan nomor Anda sendiri
-4. Klik **Mulai Blast** → verify pesan masuk WA Anda
-5. Cek tab **Riwayat Blast** → entry muncul dengan nama + email Anda
-
----
-
-## Operasional sehari-hari
-
-### Update kode frontend
-
-```bash
-# edit file di docs/
-git add docs/
-git commit -m "Update UI"
-git push
-# Pages auto-rebuild ~30 detik
-```
-
-### Update kode backend
-
-```bash
-# edit *.go
-go build -o blast-wa-personal ./...
-# stop server (Ctrl+C di terminal 1), jalankan ulang:
-./blast-wa-personal
-```
-
-### Start sistem (setelah Mac restart)
-
-Tab 1:
-```bash
-cd "/Users/m1/Documents/Claude/Projects/Blast WA Personal" && ./blast-wa-personal
-```
-
-Tab 2:
-```bash
-cloudflared tunnel run blast-wa
-```
-
-Atau install sebagai service biar auto-start:
-```bash
-sudo cloudflared service install
-```
-
-### Share URL ke team
-
-Kirim ke Slack/grup WA:
-> **Blast WA Personal**
-> URL: https://<USERNAME>.github.io/blast-wa-personal/
-> Login: akun Google @majoo.id Anda
-> Audit log: tab "Riwayat Blast"
-
----
-
-## Checklist produksi
-
-- [ ] Repo di-tag release pertama (`git tag v1.0.0 && git push --tags`)
-- [ ] `.env` di-backup ke 1Password / vault majoo (kalau hilang, semua user logout paksa + ribet re-pair OAuth)
-- [ ] OAuth consent screen status: **In production** (kalau External), atau **Internal** (kalau org)
-- [ ] Nomor WA sender dedicated (bukan personal admin)
-- [ ] Slot Linked Device WA cukup (max 4 per nomor — koordinasi dengan service WA majoo lain)
-- [ ] PIC pantau HP sender untuk handle reply
-- [ ] Sign-off legal/compliance untuk PDP UU 27/2022
-- [ ] Test 2-3 nomor (termasuk diri sendiri) sebelum batch besar
-- [ ] Setup `launchd` agar app auto-start saat Mac booting
-- [ ] (Opsional) UptimeRobot monitor `https://blast-wa-api.majoo.id/api/me`
-
----
-
-## Troubleshooting matrix
-
-| Layer | Symptom | Check |
-|---|---|---|
-| GitHub Pages | URL 404 | Settings → Pages → Source = main /docs |
-| Pages cache | Update tidak muncul | Hard refresh (Cmd+Shift+R), tunggu 60s deploy |
-| Backend tunnel | "Bad gateway" | Tab 1 (`./blast-wa-personal`) jalan? |
-| Backend tunnel | Cloudflare 1033 | Tab 2 (`cloudflared tunnel run`) jalan? |
-| OAuth | redirect_uri_mismatch | GCP redirect URI ↔ `.env` `OAUTH_REDIRECT_URL` identik? |
-| OAuth | App not verified | External + production butuh verification Google; pakai Internal untuk org majoo |
-| CORS | Browser console CORS error | `ALLOWED_ORIGINS` cover origin exact (https/http, no trailing slash) |
-| Cookie | Login bouncing back to /login | Cookie tidak ter-set: cek HTTPS aktif, SameSite=None+Secure (auto saat HTTPS) |
-| WA | "nomor tidak terdaftar" | Cek format CSV — phone harus nomor WA aktif |
-| WA | Logout otomatis dari WA | Banned/limit. Turunkan rate, variasikan template, ganti sender |
-
----
-
-## Architecture flow (reference)
-
-```
-[User browser]
-     │
-     │ (1) GET https://<USER>.github.io/blast-wa-personal/
-     ↓
-[GitHub Pages CDN]
-     │ serve docs/index.html + config.js
-     ↓
-[Browser executes index.html]
-     │ (2) fetch https://blast-wa-api.majoo.id/api/me (credentials: include)
-     ↓
-[Cloudflare Tunnel]
-     │ proxy ke localhost:8080
-     ↓
-[Mac: blast-wa-personal]
-     │ check cookie HMAC-signed
-     │ if invalid → 401 → frontend redirect ke login.html
-     │ if valid → return user → render app
-     ↓
-[User klik "Mulai Blast"]
-     │ POST /api/blast (multipart) ke backend
-     ↓
-[Backend: whatsmeow]
-     │ kirim WA satu per satu dengan jitter
-     │ tulis ke session/audit.db
-     ↓
-[Frontend poll /api/progress tiap 1.5 detik]
-```
+Hapus folder `.wwebjs_auth/` = logout (harus scan QR lagi). Jangan commit folder ini.
+
+## Checklist uji end-to-end
+1. `/api/status` → `connected:true` setelah scan QR.
+2. Upload CSV (1–2 nomor test) → pesan attempt-1 sampai; cek tab Riwayat & thread `after_blast`.
+3. Balas dari HP test → masuk Inbox, thread → `open`.
+4. Reply via web → `in_progress`; Done → closing terkirim + `done` (locked).
+5. `Run Blast Attempt` / `POST /api/retry/run-now?limit=1` → attempt 2 terkirim.
+6. Export Sheets → tab "Blast Log" & "Belum Respons" terisi; "Sync Team" dari tab "Query Blast".
+7. Logout dari HP → server auto re-init → QR baru muncul tanpa restart.
+
+## Troubleshooting
+- **Chromium gagal launch / "Failed to launch the browser process"** (umum di Linux/VPS/root): pastikan dependensi system terpasang; arg `--no-sandbox` sudah diset di `wa.js`. Kalau perlu, set `PUPPETEER_EXECUTABLE_PATH`.
+- **Login loop / cookie tidak nyimpan**: pastikan `API_BASE` = host yang sama dengan halaman (same-origin). Beda host → cookie pihak ketiga diblokir Safari/Firefox.
+- **`error 463` / nomor diblok kirim**: itu dari WhatsApp (anti-spam), bukan bug. Turunkan volume, perbesar jitter, hangatkan nomor.

@@ -1,8 +1,9 @@
-// Konfigurasi runtime — edit URL backend di sini setelah Cloudflare Tunnel siap.
+// Konfigurasi runtime — URL backend untuk environment STAGING (Node.js).
 // File ini di-load sebelum semua script aplikasi, jadi window.APP_CONFIG global tersedia.
 window.APP_CONFIG = {
-  // Wajib: URL backend (Cloudflare Tunnel ke Mac yang jalanin Go app).
-  // Contoh: "https://blast-wa-api.majoo.id"
-  // BIARKAN kosong "" hanya saat development di mana frontend & backend sama host.
-  API_BASE: "https://mid-dennis-luther-named.trycloudflare.com",
+  // Wajib NON-KOSONG (frontend menolak API_BASE kosong).
+  // - Lokal dev (mesin staging sendiri): "http://localhost:8080"
+  // - Setelah Cloudflare Tunnel staging siap, ganti ke: "https://<tunnel-staging>"
+  //   (URL harus SAMA dengan host halaman ini → tetap same-origin / first-party cookie).
+  API_BASE: "http://localhost:8080",
 };
