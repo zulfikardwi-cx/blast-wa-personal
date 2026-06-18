@@ -276,6 +276,45 @@ func atoiEnv(key string, def int) int {
 	return n
 }
 
+// handleRetryPreview — daftar nomor yang BENAR-BENAR akan diblast kalau Run ditekan:
+// after_blast/in_progress, attempt<3, belum dikirim hari ini. Tidak mengirim apa pun.
+func handleRetryPreview(w http.ResponseWriter, r *http.Request) {
+	now := time.Now().In(wibLoc)
+	startOfToday := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, wibLoc)
+	rows, err := auditDB.Query(`
+SELECT phone, COALESCE(nama_outlet,''), COALESCE(nomer_invoice,''), current_attempt, status, COALESCE(last_attempt_at,'')
+FROM chat_threads
+WHERE status IN ('after_blast','in_progress') AND current_attempt < 3
+ORDER BY current_attempt DESC, last_attempt_at ASC`)
+	if err != nil {
+		httpErr(w, 500, "query: %v", err)
+		return
+	}
+	defer rows.Close()
+	type previewRow struct {
+		Phone          string `json:"phone"`
+		NamaOutlet     string `json:"nama_outlet"`
+		NomerInvoice   string `json:"nomer_invoice"`
+		CurrentAttempt int    `json:"current_attempt"`
+		NextAttempt    int    `json:"next_attempt"`
+		Status         string `json:"status"`
+	}
+	out := []previewRow{}
+	for rows.Next() {
+		var p previewRow
+		var lastAt string
+		if err := rows.Scan(&p.Phone, &p.NamaOutlet, &p.NomerInvoice, &p.CurrentAttempt, &p.Status, &lastAt); err != nil {
+			continue
+		}
+		if attemptedToday(lastAt, startOfToday) {
+			continue
+		}
+		p.NextAttempt = p.CurrentAttempt + 1
+		out = append(out, p)
+	}
+	writeJSON(w, map[string]any{"rows": out, "count": len(out)})
+}
+
 // handleRetryRunNow — trigger MANUAL: jalankan batch retry sekarang juga, lewati
 // guard window-jam. Query opsional ?limit=N untuk batasi jumlah (mis. tes batch kecil).
 // Tetap hormati: WA harus connected, attempt<3, belum dikirimi hari ini, jitter 20-40s.
