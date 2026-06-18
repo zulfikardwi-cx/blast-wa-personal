@@ -85,7 +85,10 @@ function stillNeedsRetry(phone, startMillis) {
   return !attemptedToday(row.last_attempt_at, startMillis);
 }
 
-async function processRetries(force, limit) {
+// processRetries(force, limit, attempt)
+//   attempt: 0/undefined = semua eligible; 2 = hanya yang next-attempt 2 (current=1);
+//            3 = hanya yang next-attempt 3 (current=2).
+async function processRetries(force, limit, attempt) {
   if (running) {
     console.log('retry: previous batch still running, skip');
     return;
@@ -110,6 +113,10 @@ async function processRetries(force, limit) {
       .all();
 
     let batch = rows.filter((r) => !attemptedToday(r.last_attempt_at, startMillis));
+    // filter per-attempt kalau diminta (tombol "Run Attempt 2" / "Run Attempt 3")
+    if (attempt === 2 || attempt === 3) {
+      batch = batch.filter((r) => r.current_attempt + 1 === attempt);
+    }
     if (limit > 0 && batch.length > limit) batch = batch.slice(0, limit);
     if (batch.length === 0) return;
 
@@ -134,8 +141,11 @@ async function processRetries(force, limit) {
       }
 
       const now2 = new Date();
+      // Attempt 2 → kembali ke 'after_blast'; Attempt 3 (tuntas) → 'force_close'.
+      // Override status sebelumnya, termasuk in_progress.
+      const newStatus = nextAttempt >= 3 ? 'force_close' : 'after_blast';
       try {
-        chat.upsertThreadRetry(r.phone, body, nextAttempt, now2);
+        chat.upsertThreadRetry(r.phone, body, nextAttempt, now2, newStatus);
       } catch (e) {
         console.log('retry: upsertThreadRetry error:', e.message);
       }
@@ -144,15 +154,7 @@ async function processRetries(force, limit) {
       } catch (e) {
         console.log('retry: recordChatMessage error:', e.message);
       }
-      console.log(`retry: phone=${r.phone} attempt ${nextAttempt} sent`);
-
-      if (nextAttempt >= 3) {
-        // Attempt 3 terkirim & masih after_blast → force_close (keluar dari antrian).
-        db.prepare(
-          `UPDATE chat_threads SET status='force_close', updated_at=datetime('now') WHERE phone=? AND status='after_blast'`
-        ).run(r.phone);
-        console.log(`retry: phone=${r.phone} attempt 3 terkirim → force_close (no response)`);
-      }
+      console.log(`retry: phone=${r.phone} attempt ${nextAttempt} sent → ${newStatus}`);
       sent++;
 
       if (i < batch.length - 1) {
@@ -202,9 +204,12 @@ function handleRetryRunNow(req, res) {
   let limit = 0;
   const v = parseInt(req.query.limit, 10);
   if (!isNaN(v) && v > 0) limit = v;
-  processRetries(true, limit).catch((e) => console.log('retry run-now error:', e.message));
-  console.log(`retry: FORCE dipicu manual via API (limit=${limit})`);
-  res.json({ ok: true, started: true, limit });
+  let attempt = 0;
+  const a = parseInt(req.query.attempt, 10);
+  if (a === 2 || a === 3) attempt = a;
+  processRetries(true, limit, attempt).catch((e) => console.log('retry run-now error:', e.message));
+  console.log(`retry: FORCE dipicu manual via API (limit=${limit}, attempt=${attempt || 'all'})`);
+  res.json({ ok: true, started: true, limit, attempt });
 }
 
 module.exports = { startScheduler, processRetries, handleRetryPreview, handleRetryRunNow, retryWindowHour };

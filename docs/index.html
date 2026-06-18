@@ -188,21 +188,36 @@
     </div>
 
     <div class="tab-pane" data-pane="report">
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap">
-        <span style="color:var(--muted);font-size:12px">Nomor di bucket After Blast + In Progress yang belum merespons (keluar otomatis saat user balas / Done / Invalid)</span>
-        <span id="reportCount" style="font-size:12px;color:var(--muted)"></span>
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;flex-wrap:wrap">
+        <span style="color:var(--muted);font-size:12px">Belum merespons (After Blast + In Progress), dipisah per attempt berikutnya. Keluar otomatis saat user balas / Done / Invalid.</span>
         <span style="flex:1"></span>
         <span id="reportSheetStatus" style="font-size:12px;color:var(--muted)"></span>
         <button id="reportCsvBtn" class="ghost">⬇️ Download CSV</button>
         <button id="reportSheetBtn" style="display:none">📊 Export ke Google Sheet</button>
-        <span id="eligibleCount" style="font-size:12px;color:var(--lime)"></span>
-        <button id="runBlastBtn" title="Blast Attempt 2/3 ke nomor eligible (manual)">▶ Run Blast Attempt 2/3</button>
         <button class="ghost" id="refreshReport">Refresh</button>
       </div>
-      <div class="scroll"><table id="reportTable">
-        <thead><tr>
-          <th>Phone</th><th>Nama Outlet</th><th>Nomor Invoice</th><th>Status Attempt 1</th><th>Status Attempt 2</th><th>Status Attempt 3</th>
-        </tr></thead>
+
+      <!-- Grup Attempt 2 (sudah Attempt 1, belum Attempt 2) -->
+      <div style="display:flex;align-items:center;gap:10px;margin:16px 0 6px;flex-wrap:wrap">
+        <h3 style="margin:0;font-size:15px">➡️ Akan Attempt 2 <span id="a2Count" style="color:var(--muted);font-weight:400;font-size:13px"></span></h3>
+        <span id="a2Eligible" style="font-size:12px;color:var(--lime)"></span>
+        <span style="flex:1"></span>
+        <button id="runA2" title="Kirim Attempt 2 ke nomor eligible (manual)">▶ Run Blast Attempt 2</button>
+      </div>
+      <div class="scroll"><table id="reportTable2">
+        <thead><tr><th>Phone</th><th>Nama Outlet</th><th>Nomor Invoice</th><th>Status Attempt 1</th><th>Status Attempt 2</th><th>Status Attempt 3</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+
+      <!-- Grup Attempt 3 (sudah Attempt 2, belum Attempt 3) -->
+      <div style="display:flex;align-items:center;gap:10px;margin:22px 0 6px;flex-wrap:wrap">
+        <h3 style="margin:0;font-size:15px">➡️ Akan Attempt 3 <span id="a3Count" style="color:var(--muted);font-weight:400;font-size:13px"></span></h3>
+        <span id="a3Eligible" style="font-size:12px;color:var(--lime)"></span>
+        <span style="flex:1"></span>
+        <button id="runA3" title="Kirim Attempt 3 ke nomor eligible (manual)">▶ Run Blast Attempt 3</button>
+      </div>
+      <div class="scroll"><table id="reportTable3">
+        <thead><tr><th>Phone</th><th>Nama Outlet</th><th>Nomor Invoice</th><th>Status Attempt 1</th><th>Status Attempt 2</th><th>Status Attempt 3</th></tr></thead>
         <tbody></tbody>
       </table></div>
     </div>
@@ -514,53 +529,64 @@ function attCell(v) {
 async function loadReport() {
   try {
     const r = await apiFetch('/api/report/unresponsive').then(r => r.json());
-    const tb = $('#reportTable tbody');
-    tb.innerHTML = '';
-    (r.rows || []).forEach(row => {
-      const tr = document.createElement('tr');
-      tr.className = 'history-row';
-      tr.innerHTML = `
-        <td>${esc(row.phone)}</td>
-        <td>${esc(row.nama_outlet)}</td>
-        <td>${esc(row.nomer_invoice)}</td>
-        ${attCell(row.attempt1)}${attCell(row.attempt2)}${attCell(row.attempt3)}`;
-      tb.appendChild(tr);
-    });
-    const n = r.count || 0;
-    $('#reportCount').textContent = n + ' nomor';
-    if (!n) tb.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:20px">Tidak ada nomor yang belum merespons. 🎉</td></tr>';
-    // jumlah yang BENAR-BENAR akan diblast kalau Run (subset: attempt<3 & belum dikirim hari ini)
+    const rows = r.rows || [];
+    const g2 = rows.filter(x => x.current_attempt === 1); // next attempt = 2
+    const g3 = rows.filter(x => x.current_attempt === 2); // next attempt = 3
+    renderReportGroup('#reportTable2 tbody', g2);
+    renderReportGroup('#reportTable3 tbody', g3);
+    $('#a2Count').textContent = '(' + g2.length + ' nomor)';
+    $('#a3Count').textContent = '(' + g3.length + ' nomor)';
+    // berapa yang BENAR-BENAR akan terkirim kalau Run (belum dikirim hari ini), per attempt
     try {
       const pv = await apiFetch('/api/retry/preview').then(r => r.json());
-      $('#eligibleCount').textContent = (pv.count || 0) + ' eligible utk blast';
-    } catch (e) { $('#eligibleCount').textContent = ''; }
-    // tombol Sheet hanya muncul kalau Sheets aktif
+      const pvRows = pv.rows || [];
+      $('#a2Eligible').textContent = pvRows.filter(x => x.next_attempt === 2).length + ' eligible utk blast';
+      $('#a3Eligible').textContent = pvRows.filter(x => x.next_attempt === 3).length + ' eligible utk blast';
+    } catch (e) { $('#a2Eligible').textContent = ''; $('#a3Eligible').textContent = ''; }
     $('#reportSheetBtn').style.display = (sheetCfg && sheetCfg.enabled) ? '' : 'none';
     $('#reportSheetStatus').textContent = (sheetCfg && sheetCfg.enabled) ? '' : 'Sheets export belum aktif';
   } catch (e) { /* ignore */ }
 }
 
+function renderReportGroup(sel, rows) {
+  const tb = $(sel);
+  tb.innerHTML = '';
+  if (!rows.length) {
+    tb.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:16px">Tidak ada. 🎉</td></tr>';
+    return;
+  }
+  rows.forEach(row => {
+    const tr = document.createElement('tr');
+    tr.className = 'history-row';
+    tr.innerHTML = `<td>${esc(row.phone)}</td><td>${esc(row.nama_outlet)}</td><td>${esc(row.nomer_invoice)}</td>${attCell(row.attempt1)}${attCell(row.attempt2)}${attCell(row.attempt3)}`;
+    tb.appendChild(tr);
+  });
+}
+
 $('#refreshReport').addEventListener('click', loadReport);
 
-// Blast manual Attempt 2/3 — preview jumlah eligible → konfirmasi → kirim via force endpoint.
-$('#runBlastBtn').addEventListener('click', async () => {
+// Run Blast per-attempt (manual): preview eligible utk attempt itu → konfirmasi → kirim.
+async function runAttempt(attempt) {
   let pv;
   try { pv = await apiFetch('/api/retry/preview').then(r => r.json()); }
   catch (e) { alert('Gagal ambil daftar eligible: ' + e.message); return; }
-  const n = pv.count || 0;
-  if (!n) { alert('Tidak ada nomor eligible untuk diblast.\n\n(Semua sudah Attempt 3, sudah dikirim hari ini, atau sudah merespons.)'); return; }
+  const n = (pv.rows || []).filter(x => x.next_attempt === attempt).length;
+  if (!n) { alert(`Tidak ada nomor eligible untuk Attempt ${attempt}.\n\n(Sudah dikirim hari ini / sudah merespons / belum waktunya.)`); return; }
   const mins = Math.max(1, Math.ceil(n * 0.5));
-  if (!confirm(`Jalankan blast manual Attempt 2/3 ke ${n} nomor eligible SEKARANG?\n\nDikecualikan otomatis: sudah Attempt 3 / sudah dikirim hari ini / sudah respons.\nJeda 20–40 detik antar nomor (± ${mins} menit total).`)) return;
-  const btn = $('#runBlastBtn'); const old = btn.textContent;
+  if (!confirm(`Jalankan blast Attempt ${attempt} ke ${n} nomor SEKARANG?\n\nJeda 20–40 detik antar nomor (± ${mins} menit).`)) return;
+  const btn = attempt === 2 ? $('#runA2') : $('#runA3');
+  const old = btn.textContent;
   btn.disabled = true; btn.textContent = '⏳ Mengirim...';
   try {
-    const r = await apiFetch('/api/retry/run-now', { method: 'POST' });
+    const r = await apiFetch('/api/retry/run-now?attempt=' + attempt, { method: 'POST' });
     if (!r.ok) { alert('Gagal: ' + await r.text()); return; }
-    alert(`▶ Blast manual dimulai untuk ${n} nomor.\nPantau di log server (~blast.log). Thread akan pindah ke Open saat customer membalas.`);
+    alert(`▶ Blast Attempt ${attempt} dimulai untuk ${n} nomor.\nSetelah terkirim, thread pindah ke ${attempt >= 3 ? 'Force Close' : 'After Blast'} (atau Open kalau customer membalas).`);
   } finally {
     setTimeout(() => { btn.disabled = false; btn.textContent = old; }, 8000);
   }
-});
+}
+$('#runA2').addEventListener('click', () => runAttempt(2));
+$('#runA3').addEventListener('click', () => runAttempt(3));
 
 $('#reportCsvBtn').addEventListener('click', async () => {
   const btn = $('#reportCsvBtn');

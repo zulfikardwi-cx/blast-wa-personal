@@ -25,6 +25,8 @@ function queryUnresponsive() {
     phone: r.phone,
     nama_outlet: r.nama_outlet,
     nomer_invoice: r.nomer_invoice,
+    current_attempt: r.current_attempt,
+    next_attempt: Math.min(r.current_attempt + 1, 3),
     attempt1: attStatus(1, r.current_attempt),
     attempt2: attStatus(2, r.current_attempt),
     attempt3: attStatus(3, r.current_attempt),

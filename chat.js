@@ -70,16 +70,18 @@ function upsertThreadBlast(phone, namaOutlet, nomerInvoice, blastID, preview, ts
   ).run(phone, namaOutlet, nomerInvoice, blastID ? blastID : null, tsStr, prev, tsStr, tsStr);
 }
 
-// upsertThreadRetry — saat scheduler kirim attempt 2/3. HANYA update last_message +
-// current_attempt + last_attempt_at. Tidak ubah status.
-function upsertThreadRetry(phone, preview, attemptNum, ts) {
+// upsertThreadRetry — saat kirim attempt 2/3. Update last_message + current_attempt +
+// last_attempt_at + STATUS bucket. Attempt 2 → 'after_blast', Attempt 3 → 'force_close'
+// (di-set pemanggil via newStatus), termasuk meng-override thread yang sebelumnya
+// in_progress (sesuai kebijakan: semua hasil retry kembali ke After Blast, attempt 3 tuntas).
+function upsertThreadRetry(phone, preview, attemptNum, ts, newStatus) {
   const tsStr = nowISO(ts);
   db.prepare(
     `UPDATE chat_threads SET
        last_message_at = ?, last_message_preview = ?, last_message_direction = 'out',
-       current_attempt = ?, last_attempt_at = ?, updated_at = ?
+       current_attempt = ?, last_attempt_at = ?, status = ?, updated_at = ?
      WHERE phone = ?`
-  ).run(tsStr, truncate(preview, 80), attemptNum, tsStr, tsStr, phone);
+  ).run(tsStr, truncate(preview, 80), attemptNum, tsStr, newStatus, tsStr, phone);
 }
 
 // upsertThreadAgentReply — agent balas via web → in_progress (assign ke agent).
