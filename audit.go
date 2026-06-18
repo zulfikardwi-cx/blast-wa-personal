@@ -93,6 +93,52 @@ func recordBlastEnd(id int64, j *BlastJob) error {
 	return err
 }
 
+// ---- Retry batch audit (attempt 2/3) ----
+// Catat batch retry sebagai entri Riwayat Blast supaya attempt 2/3 yang benar-benar
+// terkirim ikut tercatat (report & monitoring), sejajar dengan blast attempt 1.
+
+func recordRetryBatchStart(email, name, template string, total int, startedAt time.Time) (int64, error) {
+	res, err := auditDB.Exec(
+		`INSERT INTO blast_logs (user_email, user_name, started_at, template, total) VALUES (?, ?, ?, ?, ?)`,
+		email, name, startedAt.Format(time.RFC3339), template, total,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+func recordRetryRecipient(logID int64, phone, outlet, invoice, status, errMsg, message string, sentAt time.Time) error {
+	if logID == 0 {
+		return nil
+	}
+	_, err := auditDB.Exec(
+		`INSERT INTO blast_recipients (blast_log_id, phone, nama_outlet, nomer_invoice, status, error, message, sent_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		logID, phone, outlet, invoice, status, nullableStr(errMsg), nullableStr(message), sentAt.Format(time.RFC3339),
+	)
+	return err
+}
+
+func recordRetryBatchEnd(logID int64, sent, failed int, endedAt time.Time) error {
+	if logID == 0 {
+		return nil
+	}
+	_, err := auditDB.Exec(
+		`UPDATE blast_logs SET sent = ?, failed = ?, total = ?, ended_at = ? WHERE id = ?`,
+		sent, failed, sent+failed, endedAt.Format(time.RFC3339), logID,
+	)
+	return err
+}
+
+// deleteEmptyBlastLog — hapus entri batch yang ternyata 0 terkirim & 0 gagal (semua
+// recipient ke-skip oleh race-guard) supaya Riwayat tidak terisi entri kosong.
+func deleteEmptyBlastLog(logID int64) {
+	if logID == 0 {
+		return
+	}
+	_, _ = auditDB.Exec(`DELETE FROM blast_logs WHERE id = ?`, logID)
+}
+
 type BlastLogRow struct {
 	ID         int64  `json:"id"`
 	UserEmail  string `json:"user_email"`
@@ -109,7 +155,9 @@ type BlastLogRow struct {
 }
 
 func handleHistory(w http.ResponseWriter, r *http.Request) {
-	rows, err := auditDB.Query(`SELECT id, user_email, COALESCE(user_name,''), started_at, COALESCE(ended_at,''), template, total, sent, failed, skipped, COALESCE(min_delay,0), COALESCE(max_delay,0) FROM blast_logs ORDER BY id DESC LIMIT 100`)
+	// Urut by started_at (waktu kejadian), bukan id — supaya entri retry hasil backfill
+	// (di-insert belakangan tapi tanggalnya lama) tetap tampil kronologis. id DESC tiebreak.
+	rows, err := auditDB.Query(`SELECT id, user_email, COALESCE(user_name,''), started_at, COALESCE(ended_at,''), template, total, sent, failed, skipped, COALESCE(min_delay,0), COALESCE(max_delay,0) FROM blast_logs ORDER BY started_at DESC, id DESC LIMIT 100`)
 	if err != nil {
 		httpErr(w, 500, "query: %v", err)
 		return

@@ -65,7 +65,8 @@ func startRetryScheduler() {
 		defer ticker.Stop()
 		for {
 			if retryEnabled {
-				processRetries(false, 0, 0) // targetAttempt=0 → semua (2 & 3) seperti biasa
+				// targetAttempt=0 → semua (2 & 3); dicatat di Riwayat Blast sbg auto-cron
+				processRetries(false, 0, 0, "system@retry", "Auto Retry (cron)")
 			}
 			processRejectSweep()
 			<-ticker.C
@@ -78,8 +79,9 @@ func startRetryScheduler() {
 // limit>0 → batasi jumlah thread yang diproses (mis. tes batch kecil dulu).
 // targetAttempt 2/3 → HANYA kirim attempt itu (current_attempt = targetAttempt-1).
 // targetAttempt 0 → semua attempt berikutnya (perilaku auto-cron lama, 2 & 3 sekaligus).
+// actorEmail/actorName → siapa yang menjalankan (untuk dicatat di Riwayat Blast).
 // Lock supaya tidak double-run (kalau interval terlalu pendek dan batch besar).
-func processRetries(force bool, limit, targetAttempt int) {
+func processRetries(force bool, limit, targetAttempt int, actorEmail, actorName string) {
 	retryMu.Lock()
 	if retryRunning {
 		retryMu.Unlock()
@@ -168,6 +170,27 @@ WHERE status IN ('after_blast', 'in_progress')
 	}
 	log.Printf("retry: %s — antrikan %d threads (after_blast + in_progress)", mode, len(batch))
 
+	// Catat batch ini ke Riwayat Blast (blast_logs + blast_recipients) untuk report &
+	// monitoring — attempt 2/3 yang benar-benar terkirim ikut tercatat seperti attempt 1.
+	batchStart := time.Now()
+	attLabel := "2 & 3"
+	if targetAttempt == 2 || targetAttempt == 3 {
+		attLabel = strconv.Itoa(targetAttempt)
+	}
+	runMode := "auto-cron"
+	if force {
+		runMode = "manual"
+	}
+	auditEmail := actorEmail
+	if auditEmail == "" {
+		auditEmail = "system@retry"
+	}
+	auditTemplate := fmt.Sprintf("Retry Attempt %s (%s)", attLabel, runMode)
+	retryLogID, err := recordRetryBatchStart(auditEmail, actorName, auditTemplate, len(batch), batchStart)
+	if err != nil {
+		log.Printf("retry: recordRetryBatchStart error: %v", err)
+	}
+
 	sent, failed := 0, 0
 	for i, r := range batch {
 		// Re-check sebelum send — kalau user balas (→ open) atau sudah dikirimi hari ini
@@ -183,6 +206,7 @@ WHERE status IN ('after_blast', 'in_progress')
 		if err := sendRetryOne(r.phone, body); err != nil {
 			log.Printf("retry: phone=%s attempt=%d FAILED: %v", r.phone, nextAttempt, err)
 			failed++
+			_ = recordRetryRecipient(retryLogID, r.phone, r.namaOutlet, r.nomerInvoice, "failed", err.Error(), body, time.Now())
 			continue
 		}
 
@@ -193,6 +217,7 @@ WHERE status IN ('after_blast', 'in_progress')
 		if err := recordChatMessage(r.phone, "out", body, "", "", now, 0, "system@retry", fmt.Sprintf("Auto Attempt %d", nextAttempt)); err != nil {
 			log.Printf("retry: recordChatMessage error: %v", err)
 		}
+		_ = recordRetryRecipient(retryLogID, r.phone, r.namaOutlet, r.nomerInvoice, "sent", "", body, now)
 
 		log.Printf("retry: phone=%s attempt %d sent", r.phone, nextAttempt)
 		if nextAttempt >= 3 {
@@ -211,6 +236,16 @@ WHERE status IN ('after_blast', 'in_progress')
 			}
 			time.Sleep(time.Duration(d) * time.Second)
 		}
+	}
+
+	// Tutup entri Riwayat Blast: kalau ada yang benar-benar dikirim/gagal → update
+	// sent/failed/ended_at; kalau semua ke-skip (0/0) → hapus entri biar tidak kosong.
+	if sent+failed > 0 {
+		if err := recordRetryBatchEnd(retryLogID, sent, failed, time.Now()); err != nil {
+			log.Printf("retry: recordRetryBatchEnd error: %v", err)
+		}
+	} else {
+		deleteEmptyBlastLog(retryLogID)
 	}
 
 	log.Printf("retry: batch done — sent=%d failed=%d", sent, failed)
@@ -432,8 +467,9 @@ func handleRetryRunNow(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	go processRetries(true, limit, attempt)
-	log.Printf("retry: FORCE dipicu manual via API (attempt=%d limit=%d)", attempt, limit)
+	user, _ := userFromCtx(r.Context())
+	go processRetries(true, limit, attempt, user.Email, user.Name)
+	log.Printf("retry: FORCE dipicu manual via API oleh %s (attempt=%d limit=%d)", user.Email, attempt, limit)
 	writeJSON(w, map[string]any{"ok": true, "started": true, "attempt": attempt, "limit": limit})
 }
 
