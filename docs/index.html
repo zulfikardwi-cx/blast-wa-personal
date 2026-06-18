@@ -72,6 +72,19 @@
   .history-row:hover{background:var(--panel2)}
   .you-tag{background:var(--teal-soft);color:var(--teal);font-size:10px;padding:1px 5px;border-radius:3px;margin-left:4px}
   .global-err{background:#7f1d1d;color:#fecaca;padding:10px 24px;font-size:13px}
+  /* Panel blast manual + chip eligible + tooltip */
+  .run-panel{display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin-bottom:10px}
+  .run-panel .lbl{font-size:12px;font-weight:600;color:var(--text);display:inline-flex;align-items:center;gap:6px}
+  .run-pair{display:inline-flex;align-items:center;gap:8px}
+  .chip{font-size:11px;padding:3px 9px;border-radius:999px;border:1px solid var(--line);background:var(--panel);color:var(--muted);white-space:nowrap}
+  .chip b{color:var(--lime);font-weight:700}
+  .chip.zero{opacity:.65}
+  .chip.zero b{color:var(--muted)}
+  .info-ic{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;border:1px solid var(--muted);color:var(--muted);font-size:10px;font-style:normal;font-weight:700;line-height:1;cursor:help}
+  .info-ic:hover{border-color:var(--teal);color:var(--teal)}
+  .tip{position:relative}
+  .tip::after{content:attr(data-tip);position:absolute;left:0;top:150%;width:320px;max-width:72vw;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:9px 11px;font-size:11px;font-weight:400;line-height:1.45;white-space:normal;z-index:60;opacity:0;visibility:hidden;transition:opacity .12s;box-shadow:0 6px 20px rgba(0,0,0,.45)}
+  .tip:hover::after{opacity:1;visibility:visible}
 </style>
 </head>
 <body>
@@ -195,10 +208,20 @@
         <span id="reportSheetStatus" style="font-size:12px;color:var(--muted)"></span>
         <button id="reportCsvBtn" class="ghost">⬇️ Download CSV</button>
         <button id="reportSheetBtn" style="display:none">📊 Export ke Google Sheet</button>
-        <span id="eligibleCount" style="font-size:12px;color:var(--lime)"></span>
-        <button id="runAtt2Btn" title="Blast Attempt 2 — hanya nomor yang attempt berikutnya = 2 (manual)">▶ Run Attempt 2</button>
-        <button id="runAtt3Btn" title="Blast Attempt 3 — hanya nomor yang attempt berikutnya = 3 (manual). Jalankan setelah Attempt 2.">▶ Run Attempt 3</button>
         <button class="ghost" id="refreshReport">Refresh</button>
+      </div>
+      <div class="run-panel">
+        <span class="lbl">▶ Blast manual
+          <span class="info-ic tip" data-tip="'Eligible' = jumlah nomor yang BENAR-BENAR akan dikirim jika tombol ditekan sekarang. Sudah memperhitungkan aturan maks 1 attempt/hari per nomor: nomor yang sudah dikirimi attempt hari ini TIDAK dihitung (baru eligible besok). Nomor yang sudah membalas / Done / Invalid juga otomatis keluar. Jalankan Attempt 2 dulu, tunggu selesai, baru Attempt 3.">i</span>
+        </span>
+        <span class="run-pair">
+          <span class="chip zero" id="eligAtt2">Att 2: <b>–</b> eligible</span>
+          <button id="runAtt2Btn" title="Blast Attempt 2 — hanya nomor yang attempt berikutnya = 2 (manual)">▶ Run Attempt 2</button>
+        </span>
+        <span class="run-pair">
+          <span class="chip zero" id="eligAtt3">Att 3: <b>–</b> eligible</span>
+          <button id="runAtt3Btn" title="Blast Attempt 3 — hanya nomor yang attempt berikutnya = 3 (manual). Jalankan setelah Attempt 2.">▶ Run Attempt 3</button>
+        </span>
       </div>
       <div class="scroll"><table id="reportTable">
         <thead><tr>
@@ -518,6 +541,13 @@ function rejCell(v) {
   if (v === 'reject') return `<td style="text-align:center;color:#fca5a5;font-weight:600">reject</td>`;
   return `<td style="text-align:center;color:var(--muted)">-</td>`;
 }
+// chip eligible per attempt — angka di-bold, abu-abu (zero) kalau 0
+function setElig(id, n, count) {
+  const el = $('#' + id);
+  if (!el) return;
+  el.innerHTML = `Att ${n}: <b>${count}</b> eligible`;
+  el.classList.toggle('zero', count === 0);
+}
 
 async function loadReport() {
   try {
@@ -542,10 +572,11 @@ async function loadReport() {
     try {
       const pv = await apiFetch('/api/retry/preview').then(r => r.json());
       const c2 = pv.count2 || 0, c3 = pv.count3 || 0;
-      $('#eligibleCount').textContent = `eligible — Att2: ${c2} · Att3: ${c3}`;
+      setElig('eligAtt2', 2, c2);
+      setElig('eligAtt3', 3, c3);
       $('#runAtt2Btn').disabled = c2 === 0;
       $('#runAtt3Btn').disabled = c3 === 0;
-    } catch (e) { $('#eligibleCount').textContent = ''; }
+    } catch (e) { /* biarkan chip apa adanya */ }
     // tombol Sheet hanya muncul kalau Sheets aktif
     $('#reportSheetBtn').style.display = (sheetCfg && sheetCfg.enabled) ? '' : 'none';
     $('#reportSheetStatus').textContent = (sheetCfg && sheetCfg.enabled) ? '' : 'Sheets export belum aktif';
