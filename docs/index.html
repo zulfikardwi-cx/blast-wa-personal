@@ -85,6 +85,11 @@
   .tip{position:relative}
   .tip::after{content:attr(data-tip);position:absolute;left:0;top:150%;width:320px;max-width:72vw;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:9px 11px;font-size:11px;font-weight:400;line-height:1.45;white-space:normal;z-index:60;opacity:0;visibility:hidden;transition:opacity .12s;box-shadow:0 6px 20px rgba(0,0,0,.45)}
   .tip:hover::after{opacity:1;visibility:visible}
+  /* badge kolom Attempt di Riwayat Blast */
+  .att-badge{font-size:11px;padding:2px 8px;border-radius:999px;font-weight:600;white-space:nowrap}
+  .att-1{background:#1f2937;color:#9aa7c7}
+  .att-r{background:var(--teal-soft);color:var(--teal)}
+  .att-mix{background:rgba(245,158,11,.15);color:var(--warn)}
 </style>
 </head>
 <body>
@@ -194,7 +199,7 @@
       </div>
       <div class="scroll"><table id="historyTable">
         <thead><tr>
-          <th>Waktu</th><th>User</th><th>Total</th><th>Sent</th><th>Failed</th><th>Durasi</th><th>Template</th>
+          <th>Waktu</th><th>User</th><th>Attempt</th><th>Total</th><th>Sent</th><th>Failed</th><th>Durasi</th><th>Template</th>
         </tr></thead>
         <tbody></tbody>
       </table></div>
@@ -501,6 +506,14 @@ $('#exportSheetBtn').addEventListener('click', async () => {
   }
 });
 
+// badge kolom Attempt: 1 = blast awal (netral), 2/3 = retry (teal), 0 = campuran
+function attemptBadge(a) {
+  const n = (a === undefined || a === null) ? 1 : a;
+  if (n === 0) return '<span class="att-badge att-mix">2 & 3</span>';
+  const cls = n === 1 ? 'att-1' : 'att-r';
+  return `<span class="att-badge ${cls}">Attempt ${n}</span>`;
+}
+
 async function loadHistory() {
   try {
     const r = await apiFetch('/api/history').then(r => r.json());
@@ -516,6 +529,7 @@ async function loadHistory() {
       tr.innerHTML = `
         <td>${esc(new Date(l.started_at).toLocaleString())}</td>
         <td>${esc(l.user_name||l.user_email)}${isYou ? '<span class="you-tag">you</span>' : ''}<br><small style="color:var(--muted)">${esc(l.user_email)}</small></td>
+        <td>${attemptBadge(l.attempt)}</td>
         <td>${l.total}</td>
         <td style="color:var(--lime)">${l.sent}</td>
         <td style="color:#fecaca">${l.failed}</td>
@@ -524,7 +538,7 @@ async function loadHistory() {
       tb.appendChild(tr);
     });
     if (!r.logs || !r.logs.length) {
-      tb.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:20px">Belum ada riwayat blast.</td></tr>';
+      tb.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:20px">Belum ada riwayat blast.</td></tr>';
     }
   } catch (e) { /* ignore */ }
 }

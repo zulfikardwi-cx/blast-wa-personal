@@ -65,8 +65,10 @@ func startRetryScheduler() {
 		defer ticker.Stop()
 		for {
 			if retryEnabled {
-				// targetAttempt=0 → semua (2 & 3); dicatat di Riwayat Blast sbg auto-cron
-				processRetries(false, 0, 0, "system@retry", "Auto Retry (cron)")
+				// Pisah per-attempt (2 dulu, lalu 3) → tiap batch jadi 1 entri Riwayat
+				// dengan attempt & template yang jelas. Sekuensial (single-flight lock).
+				processRetries(false, 0, 2, "system@retry", "Auto Retry (cron)")
+				processRetries(false, 0, 3, "system@retry", "Auto Retry (cron)")
 			}
 			processRejectSweep()
 			<-ticker.C
@@ -173,20 +175,20 @@ WHERE status IN ('after_blast', 'in_progress')
 	// Catat batch ini ke Riwayat Blast (blast_logs + blast_recipients) untuk report &
 	// monitoring — attempt 2/3 yang benar-benar terkirim ikut tercatat seperti attempt 1.
 	batchStart := time.Now()
-	attLabel := "2 & 3"
-	if targetAttempt == 2 || targetAttempt == 3 {
-		attLabel = strconv.Itoa(targetAttempt)
-	}
-	runMode := "auto-cron"
-	if force {
-		runMode = "manual"
-	}
 	auditEmail := actorEmail
 	if auditEmail == "" {
 		auditEmail = "system@retry"
 	}
-	auditTemplate := fmt.Sprintf("Retry Attempt %s (%s)", attLabel, runMode)
-	retryLogID, err := recordRetryBatchStart(auditEmail, actorName, auditTemplate, len(batch), batchStart)
+	// template = template attempt ASLI (raw, dengan {{...}}) → tampil di Riwayat seperti
+	// attempt 1. Kolom Attempt + User yang membedakan attempt berapa & manual/auto.
+	auditTemplate := GetAttemptTemplate(targetAttempt)
+	auditAttempt := targetAttempt
+	if targetAttempt != 2 && targetAttempt != 3 {
+		// fallback — tak terjadi via UI/auto (selalu per-attempt), tapi jaga-jaga.
+		auditTemplate = "Retry Attempt 2 & 3"
+		auditAttempt = 0
+	}
+	retryLogID, err := recordRetryBatchStart(auditEmail, actorName, auditTemplate, auditAttempt, len(batch), batchStart)
 	if err != nil {
 		log.Printf("retry: recordRetryBatchStart error: %v", err)
 	}

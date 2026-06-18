@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -52,6 +53,13 @@ CREATE INDEX IF NOT EXISTS idx_recipients_phone ON blast_recipients(phone);
 		return err
 	}
 	auditDB = db
+
+	// Migrasi: kolom attempt di blast_logs (1 = blast awal, 2/3 = retry). Row lama
+	// otomatis dapat 1 (mayoritas memang attempt 1; entri retry backfill dibetulkan
+	// jadi 2/3 oleh fixupBackfillRetryLogs di initChat).
+	if _, e := db.Exec(`ALTER TABLE blast_logs ADD COLUMN attempt INTEGER NOT NULL DEFAULT 1`); e != nil && !strings.Contains(e.Error(), "duplicate column") {
+		return e
+	}
 	return nil
 }
 
@@ -97,10 +105,10 @@ func recordBlastEnd(id int64, j *BlastJob) error {
 // Catat batch retry sebagai entri Riwayat Blast supaya attempt 2/3 yang benar-benar
 // terkirim ikut tercatat (report & monitoring), sejajar dengan blast attempt 1.
 
-func recordRetryBatchStart(email, name, template string, total int, startedAt time.Time) (int64, error) {
+func recordRetryBatchStart(email, name, template string, attempt, total int, startedAt time.Time) (int64, error) {
 	res, err := auditDB.Exec(
-		`INSERT INTO blast_logs (user_email, user_name, started_at, template, total) VALUES (?, ?, ?, ?, ?)`,
-		email, name, startedAt.Format(time.RFC3339), template, total,
+		`INSERT INTO blast_logs (user_email, user_name, started_at, template, attempt, total) VALUES (?, ?, ?, ?, ?, ?)`,
+		email, name, startedAt.Format(time.RFC3339), template, attempt, total,
 	)
 	if err != nil {
 		return 0, err
@@ -152,12 +160,13 @@ type BlastLogRow struct {
 	Skipped    int    `json:"skipped"`
 	MinDelay   int    `json:"min_delay"`
 	MaxDelay   int    `json:"max_delay"`
+	Attempt    int    `json:"attempt"`
 }
 
 func handleHistory(w http.ResponseWriter, r *http.Request) {
 	// Urut by started_at (waktu kejadian), bukan id — supaya entri retry hasil backfill
 	// (di-insert belakangan tapi tanggalnya lama) tetap tampil kronologis. id DESC tiebreak.
-	rows, err := auditDB.Query(`SELECT id, user_email, COALESCE(user_name,''), started_at, COALESCE(ended_at,''), template, total, sent, failed, skipped, COALESCE(min_delay,0), COALESCE(max_delay,0) FROM blast_logs ORDER BY started_at DESC, id DESC LIMIT 100`)
+	rows, err := auditDB.Query(`SELECT id, user_email, COALESCE(user_name,''), started_at, COALESCE(ended_at,''), template, total, sent, failed, skipped, COALESCE(min_delay,0), COALESCE(max_delay,0), COALESCE(attempt,1) FROM blast_logs ORDER BY started_at DESC, id DESC LIMIT 100`)
 	if err != nil {
 		httpErr(w, 500, "query: %v", err)
 		return
@@ -166,7 +175,7 @@ func handleHistory(w http.ResponseWriter, r *http.Request) {
 	var out []BlastLogRow
 	for rows.Next() {
 		var b BlastLogRow
-		if err := rows.Scan(&b.ID, &b.UserEmail, &b.UserName, &b.StartedAt, &b.EndedAt, &b.Template, &b.Total, &b.Sent, &b.Failed, &b.Skipped, &b.MinDelay, &b.MaxDelay); err != nil {
+		if err := rows.Scan(&b.ID, &b.UserEmail, &b.UserName, &b.StartedAt, &b.EndedAt, &b.Template, &b.Total, &b.Sent, &b.Failed, &b.Skipped, &b.MinDelay, &b.MaxDelay, &b.Attempt); err != nil {
 			httpErr(w, 500, "scan: %v", err)
 			return
 		}

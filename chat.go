@@ -91,7 +91,48 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_wa_id ON chat_messages(wa_message
 		// non-fatal: backfill best-effort, jangan halangi startup
 		fmt.Println("warn: backfillFailedThreads:", err)
 	}
+	fixupBackfillRetryLogs()
 	return nil
+}
+
+// fixupBackfillRetryLogs — betulkan entri Riwayat hasil backfill retry lama: isi kolom
+// attempt (2/3) dan ganti template label ("Retry Attempt N (auto, backfill ...)") jadi
+// template attempt ASLI (raw, dengan {{...}}) supaya tampil konsisten dgn attempt 1.
+// Idempoten: setelah template di-update, tidak lagi cocok pola LIKE → run berikutnya no-op.
+func fixupBackfillRetryLogs() {
+	rows, err := auditDB.Query(`SELECT id, template FROM blast_logs WHERE template LIKE 'Retry Attempt % (auto, backfill %'`)
+	if err != nil {
+		return
+	}
+	type fr struct {
+		id  int64
+		tpl string
+	}
+	var list []fr
+	for rows.Next() {
+		var f fr
+		if rows.Scan(&f.id, &f.tpl) == nil {
+			list = append(list, f)
+		}
+	}
+	rows.Close()
+
+	fixed := 0
+	for _, f := range list {
+		var att int
+		fmt.Sscanf(f.tpl, "Retry Attempt %d", &att)
+		if att != 2 && att != 3 {
+			continue
+		}
+		if _, e := auditDB.Exec(`UPDATE blast_logs SET attempt=?, template=? WHERE id=?`, att, GetAttemptTemplate(att), f.id); e != nil {
+			fmt.Println("warn: fixupBackfillRetryLogs:", e)
+			continue
+		}
+		fixed++
+	}
+	if fixed > 0 {
+		fmt.Printf("fixup: %d entri Riwayat retry backfill dibetulkan (attempt + template asli)\n", fixed)
+	}
 }
 
 // backfillFailedThreads — buat thread 'rejected' untuk recipient blast yang berstatus
