@@ -22,8 +22,10 @@ var (
 	retryRunning     bool
 	retryIntervalMin int
 	retryWindowHour  int
+	retryRejectHour  int
 	retryMinJitter   int
 	retryMaxJitter   int
+	retryEnabled     bool
 	wibLoc           *time.Location
 )
 
@@ -33,6 +35,7 @@ var (
 func startRetryScheduler() {
 	retryIntervalMin = atoiEnv("RETRY_CHECK_INTERVAL_MINUTES", 30)
 	retryWindowHour = atoiEnv("RETRY_WINDOW_HOUR", 9)
+	retryRejectHour = atoiEnv("RETRY_REJECT_HOUR", 16)
 	retryMinJitter = atoiEnv("RETRY_SEND_MIN_DELAY", 20)
 	retryMaxJitter = atoiEnv("RETRY_SEND_MAX_DELAY", 40)
 
@@ -43,16 +46,17 @@ func startRetryScheduler() {
 		log.Printf("retry scheduler: LoadLocation Asia/Jakarta gagal (%v), fallback fixed UTC+7", err)
 	}
 
-	// Saklar pause auto-cron. RETRY_ENABLED=false → burst Attempt 2/3 jam-9 MATI
-	// (mencegah ban berulang). Endpoint force manual /api/retry/run-now TETAP jalan,
-	// karena memanggil processRetries langsung (tidak lewat goroutine ini).
-	if !boolEnv("RETRY_ENABLED", true) {
-		log.Println("retry scheduler: DISABLED (RETRY_ENABLED=false) — auto-cron jam-9 MATI. Force manual tetap bisa.")
-		return
+	// Saklar pause auto-cron SEND. RETRY_ENABLED=false → burst Attempt 2/3 jam-9 MATI
+	// (mencegah ban berulang). Endpoint force manual /api/retry/run-now TETAP jalan.
+	// CATATAN: reject-sweep (16:00) hanya update DB (tidak kirim pesan) → SELALU jalan,
+	// termasuk saat RETRY_ENABLED=false.
+	retryEnabled = boolEnv("RETRY_ENABLED", true)
+	if !retryEnabled {
+		log.Printf("retry scheduler: SEND DISABLED (RETRY_ENABLED=false) — auto-cron jam-%02d MATI. Reject-sweep %02d:00 & force manual tetap jalan.", retryWindowHour, retryRejectHour)
+	} else {
+		log.Printf("retry scheduler: interval=%dm window=%02d:00 WIB reject=%02d:00 WIB jitter=%d-%ds (max 1x/hari per thread)",
+			retryIntervalMin, retryWindowHour, retryRejectHour, retryMinJitter, retryMaxJitter)
 	}
-
-	log.Printf("retry scheduler: interval=%dm window=%02d:00 WIB jitter=%d-%ds (max 1x/hari per thread)",
-		retryIntervalMin, retryWindowHour, retryMinJitter, retryMaxJitter)
 
 	go func() {
 		// Delay awal 2 menit setelah start, biar WA connect dulu
@@ -60,7 +64,10 @@ func startRetryScheduler() {
 		ticker := time.NewTicker(time.Duration(retryIntervalMin) * time.Minute)
 		defer ticker.Stop()
 		for {
-			processRetries(false, 0)
+			if retryEnabled {
+				processRetries(false, 0, 0) // targetAttempt=0 → semua (2 & 3) seperti biasa
+			}
+			processRejectSweep()
 			<-ticker.C
 		}
 	}()
@@ -69,8 +76,10 @@ func startRetryScheduler() {
 // processRetries — cek semua thread yang perlu retry, kirim attempt berikutnya.
 // force=true → lewati window-jam guard (dipakai endpoint manual /api/retry/run-now).
 // limit>0 → batasi jumlah thread yang diproses (mis. tes batch kecil dulu).
+// targetAttempt 2/3 → HANYA kirim attempt itu (current_attempt = targetAttempt-1).
+// targetAttempt 0 → semua attempt berikutnya (perilaku auto-cron lama, 2 & 3 sekaligus).
 // Lock supaya tidak double-run (kalau interval terlalu pendek dan batch besar).
-func processRetries(force bool, limit int) {
+func processRetries(force bool, limit, targetAttempt int) {
 	retryMu.Lock()
 	if retryRunning {
 		retryMu.Unlock()
@@ -105,12 +114,20 @@ func processRetries(force bool, limit int) {
 
 	// List "Belum Respons" = after_blast + in_progress (sama persis dgn report.go).
 	// Begitu user balas → status pindah ke 'open' → otomatis keluar antrian.
-	rows, err := auditDB.Query(`
+	q := `
 SELECT phone, COALESCE(nama_outlet, ''), COALESCE(nomer_invoice, ''), current_attempt, COALESCE(last_attempt_at, '')
 FROM chat_threads
 WHERE status IN ('after_blast', 'in_progress')
-  AND current_attempt < 3
-ORDER BY current_attempt DESC, last_attempt_at ASC`)
+  AND current_attempt < 3`
+	var qargs []any
+	if targetAttempt == 2 || targetAttempt == 3 {
+		// hanya thread yang attempt BERIKUTNYA == targetAttempt
+		q += ` AND current_attempt = ?`
+		qargs = append(qargs, targetAttempt-1)
+	}
+	q += ` ORDER BY current_attempt DESC, last_attempt_at ASC`
+
+	rows, err := auditDB.Query(q, qargs...)
 	if err != nil {
 		log.Printf("retry: query error: %v", err)
 		return
@@ -146,6 +163,9 @@ ORDER BY current_attempt DESC, last_attempt_at ASC`)
 	if force {
 		mode = "FORCE (manual)"
 	}
+	if targetAttempt == 2 || targetAttempt == 3 {
+		mode += fmt.Sprintf(" Attempt %d", targetAttempt)
+	}
 	log.Printf("retry: %s — antrikan %d threads (after_blast + in_progress)", mode, len(batch))
 
 	sent, failed := 0, 0
@@ -176,13 +196,10 @@ ORDER BY current_attempt DESC, last_attempt_at ASC`)
 
 		log.Printf("retry: phone=%s attempt %d sent", r.phone, nextAttempt)
 		if nextAttempt >= 3 {
-			// Attempt 3 (terakhir) terkirim & tetap belum ada respons → pindah dari
-			// after_blast ke force_close. Hanya kalau masih after_blast (kalau sudah
-			// balas/diubah, jangan timpa). Otomatis keluar dari auto-retry & Belum Respons.
-			if _, err := auditDB.Exec(`UPDATE chat_threads SET status='force_close', updated_at=datetime('now') WHERE phone=? AND status='after_blast'`, r.phone); err != nil {
-				log.Printf("retry: set force_close error: %v", err)
-			}
-			log.Printf("retry: phone=%s attempt 3 terkirim → force_close (no response)", r.phone)
+			// Attempt 3 (terakhir) terkirim. JANGAN langsung close — beri tenggang sampai
+			// jam reject (16:00 WIB) hari ini. processRejectSweep yang akan menandai
+			// 'rejected' kalau tetap tidak ada respons. Kalau user balas dulu → 'open'.
+			log.Printf("retry: phone=%s attempt 3 terkirim → tunggu respons s/d %02d:00 WIB (reject-sweep)", r.phone, retryRejectHour)
 		}
 		sent++
 
@@ -197,6 +214,69 @@ ORDER BY current_attempt DESC, last_attempt_at ASC`)
 	}
 
 	log.Printf("retry: batch done — sent=%d failed=%d", sent, failed)
+}
+
+// processRejectSweep — tandai 'rejected' semua nomor yang sudah dikirimi Attempt 3 tapi
+// belum merespons hingga jam RETRY_REJECT_HOUR (default 16:00 WIB) pada HARI Attempt 3
+// dikirim. Hanya update DB (tidak kirim pesan) → aman dijalankan kapan saja, termasuk saat
+// RETRY_ENABLED=false. Begitu user balas → status 'open' → otomatis tidak kena sweep.
+// Status 'rejected' membuat nomor keluar dari antrian auto-retry & tampil di Log Status
+// Update dengan kolom Rejected = "reject".
+func processRejectSweep() {
+	now := time.Now().In(wibLoc)
+
+	rows, err := auditDB.Query(`
+SELECT phone, COALESCE(last_attempt_at, '')
+FROM chat_threads
+WHERE status IN ('after_blast', 'in_progress') AND current_attempt >= 3`)
+	if err != nil {
+		log.Printf("reject-sweep: query error: %v", err)
+		return
+	}
+	type rrow struct{ phone, lastAt string }
+	var batch []rrow
+	for rows.Next() {
+		var r rrow
+		if err := rows.Scan(&r.phone, &r.lastAt); err != nil {
+			continue
+		}
+		batch = append(batch, r)
+	}
+	rows.Close()
+
+	rejected := 0
+	for _, r := range batch {
+		if r.lastAt == "" {
+			continue
+		}
+		t3, err := time.Parse(time.RFC3339, r.lastAt)
+		if err != nil {
+			continue
+		}
+		// cutoff = jam reject WIB pada hari Attempt 3 dikirim. now < cutoff → masih ada
+		// kesempatan respons hari ini, skip. (Kalau sweep ketinggalan beberapa hari, hari
+		// Attempt 3 sudah lewat → now pasti > cutoff → tetap ke-reject.)
+		t3 = t3.In(wibLoc)
+		cutoff := time.Date(t3.Year(), t3.Month(), t3.Day(), retryRejectHour, 0, 0, 0, wibLoc)
+		if now.Before(cutoff) {
+			continue
+		}
+		// Guard status di WHERE: kalau balasan masuk antara query & update (→ 'open'),
+		// jangan timpa.
+		reason := fmt.Sprintf("Tidak ada respons s/d %02d:00 WIB (Attempt 3)", retryRejectHour)
+		res, err := auditDB.Exec(`UPDATE chat_threads SET status='rejected', rejected_at=?, reject_reason=?, updated_at=datetime('now') WHERE phone=? AND status IN ('after_blast','in_progress') AND current_attempt >= 3`,
+			now.Format(time.RFC3339), reason, r.phone)
+		if err != nil {
+			log.Printf("reject-sweep: update %s error: %v", r.phone, err)
+			continue
+		}
+		if n, _ := res.RowsAffected(); n > 0 {
+			rejected++
+		}
+	}
+	if rejected > 0 {
+		log.Printf("reject-sweep: %d nomor → rejected (Attempt 3 tanpa respons s/d %02d:00 WIB)", rejected, retryRejectHour)
+	}
 }
 
 // attemptedToday — true kalau last_attempt_at jatuh pada hari kalender yang sama
@@ -300,6 +380,7 @@ ORDER BY current_attempt DESC, last_attempt_at ASC`)
 		Status         string `json:"status"`
 	}
 	out := []previewRow{}
+	count2, count3 := 0, 0
 	for rows.Next() {
 		var p previewRow
 		var lastAt string
@@ -310,9 +391,16 @@ ORDER BY current_attempt DESC, last_attempt_at ASC`)
 			continue
 		}
 		p.NextAttempt = p.CurrentAttempt + 1
+		switch p.NextAttempt {
+		case 2:
+			count2++
+		case 3:
+			count3++
+		}
 		out = append(out, p)
 	}
-	writeJSON(w, map[string]any{"rows": out, "count": len(out)})
+	// count = total (kompat lama); count2/count3 = eligible per attempt utk 2 tombol terpisah
+	writeJSON(w, map[string]any{"rows": out, "count": len(out), "count2": count2, "count3": count3})
 }
 
 // handleRetryRunNow — trigger MANUAL: jalankan batch retry sekarang juga, lewati
@@ -334,9 +422,19 @@ func handleRetryRunNow(w http.ResponseWriter, r *http.Request) {
 			limit = n
 		}
 	}
-	go processRetries(true, limit)
-	log.Printf("retry: FORCE dipicu manual via API (limit=%d)", limit)
-	writeJSON(w, map[string]any{"ok": true, "started": true, "limit": limit})
+	// attempt=2 atau 3 → hanya kirim attempt itu. Kosong/0 → semua (2 & 3) seperti dulu.
+	attempt := 0
+	if v := r.URL.Query().Get("attempt"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && (n == 2 || n == 3) {
+			attempt = n
+		} else {
+			httpErr(w, 400, "attempt harus 2 atau 3")
+			return
+		}
+	}
+	go processRetries(true, limit, attempt)
+	log.Printf("retry: FORCE dipicu manual via API (attempt=%d limit=%d)", attempt, limit)
+	writeJSON(w, map[string]any{"ok": true, "started": true, "attempt": attempt, "limit": limit})
 }
 
 // avoid unused

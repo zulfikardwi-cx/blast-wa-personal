@@ -291,7 +291,7 @@ func runBlast(ctx context.Context, job *BlastJob) {
 			fmt.Println("warn: recordRecipient failed for", rec.Phone, ":", err)
 		}
 
-		// Update chat thread & message (untuk Inbox) — hanya kalau berhasil kirim
+		// Update chat thread & message (untuk Inbox).
 		if rec.Status == "sent" {
 			now := time.Now()
 			if err := upsertThreadBlast(rec.Phone, rec.NamaOutlet, rec.NomerInv, job.auditID, msg, now); err != nil {
@@ -299,6 +299,12 @@ func runBlast(ctx context.Context, job *BlastJob) {
 			}
 			if err := recordChatMessage(rec.Phone, "out", msg, "", "", now, job.auditID, job.UserEmail, job.UserName); err != nil {
 				fmt.Println("warn: recordChatMessage outgoing blast:", err)
+			}
+		} else if rec.Status == "failed" {
+			// Attempt 1 gagal kirim → tandai thread 'rejected' supaya muncul di Log Status
+			// Update (Attempt 1 = "Rejected", kolom Rejected = "reject") utk di-reject tim WO.
+			if err := upsertThreadBlastFailed(rec.Phone, rec.NamaOutlet, rec.NomerInv, job.auditID, rec.Error, time.Now()); err != nil {
+				fmt.Println("warn: upsertThreadBlastFailed:", err)
 			}
 		}
 

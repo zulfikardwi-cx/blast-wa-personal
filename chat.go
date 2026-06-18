@@ -69,6 +69,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_wa_id ON chat_messages(wa_message
 		{"last_attempt_at", "TEXT"},
 		{"team", "TEXT"},
 		{"area", "TEXT"},
+		// attempt1_failed: blast Attempt 1 gagal kirim (mis. nomor tidak terdaftar WA) →
+		// sel Attempt 1 ditandai "Rejected". rejected_at: timestamp saat thread jadi reject
+		// (Attempt 1 gagal, atau Attempt 3 tanpa respons s/d jam reject) → kolom Rejected.
+		{"attempt1_failed", "INTEGER NOT NULL DEFAULT 0"},
+		{"rejected_at", "TEXT"},
+		// reject_reason: alasan reject untuk ditampilkan di kolom Info/Alasan Log Status
+		// Update — mis. "nomor tidak terdaftar di WhatsApp" (Attempt 1 gagal) atau
+		// "Tidak ada respons s/d 16:00 WIB" (Attempt 3).
+		{"reject_reason", "TEXT"},
 	}
 	for _, c := range addColumns {
 		_, e := auditDB.Exec(fmt.Sprintf("ALTER TABLE chat_threads ADD COLUMN %s %s", c.col, c.def))
@@ -76,6 +85,43 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_wa_id ON chat_messages(wa_message
 		if e != nil && !strings.Contains(e.Error(), "duplicate column") {
 			return e
 		}
+	}
+
+	if err := backfillFailedThreads(); err != nil {
+		// non-fatal: backfill best-effort, jangan halangi startup
+		fmt.Println("warn: backfillFailedThreads:", err)
+	}
+	return nil
+}
+
+// backfillFailedThreads — buat thread 'rejected' untuk recipient blast yang berstatus
+// 'failed' tapi BELUM punya thread (kasus blast lama, sebelum logic Attempt-1-gagal ada).
+// Idempoten: hanya insert kalau phone belum ada di chat_threads (NOT EXISTS), jadi aman
+// dijalankan tiap startup & tidak menimpa thread yang sudah pernah direspons/sukses.
+// Ambil baris failed TERBARU per phone (MAX(id)) untuk alasan & data outlet.
+func backfillFailedThreads() error {
+	res, err := auditDB.Exec(`
+INSERT INTO chat_threads
+	(phone, nama_outlet, nomer_invoice, last_blast_id, last_message_at, last_message_preview,
+	 last_message_direction, status, unread_count, current_attempt, last_attempt_at,
+	 attempt1_failed, rejected_at, reject_reason, created_at, updated_at)
+SELECT r.phone, r.nama_outlet, r.nomer_invoice, r.blast_log_id,
+	COALESCE(NULLIF(r.sent_at,''), r.created_at),
+	'[GAGAL KIRIM] ' || COALESCE(r.error,''),
+	'out', 'rejected', 0, 1,
+	COALESCE(NULLIF(r.sent_at,''), r.created_at),
+	1, datetime('now'),
+	COALESCE(NULLIF(r.error,''), 'Gagal kirim'),
+	r.created_at, datetime('now')
+FROM blast_recipients r
+JOIN (SELECT phone, MAX(id) AS maxid FROM blast_recipients WHERE status='failed' GROUP BY phone) m
+	ON r.id = m.maxid
+WHERE NOT EXISTS (SELECT 1 FROM chat_threads t WHERE t.phone = r.phone)`)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		fmt.Printf("backfill: %d nomor failed (blast lama) → thread 'rejected' dibuat\n", n)
 	}
 	return nil
 }
@@ -212,6 +258,39 @@ ON CONFLICT(phone) DO UPDATE SET
 	last_attempt_at = excluded.last_attempt_at,
 	updated_at = excluded.updated_at`,
 		phone, namaOutlet, nomerInvoice, nullableID(blastID), tsStr, prev, tsStr, tsStr)
+	return err
+}
+
+// upsertThreadBlastFailed — dipanggil saat BLAST Attempt 1 GAGAL kirim (mis. nomor tidak
+// terdaftar di WhatsApp). Tandai thread langsung sebagai 'rejected' supaya muncul di tab
+// Log Status Update dengan sel Attempt 1 = "Rejected" + kolom Rejected = "reject" (untuk
+// tim WO melakukan reject). status 'rejected' membuatnya OTOMATIS keluar dari antrian
+// auto-retry (query retry hanya after_blast/in_progress). Tidak menimpa thread yang sudah
+// pernah direspons / sedang ditangani / selesai (open/in_progress/on_going/done).
+func upsertThreadBlastFailed(phone, namaOutlet, nomerInvoice string, blastID int64, errMsg string, ts time.Time) error {
+	tsStr := ts.Format(time.RFC3339)
+	prev := truncate("[GAGAL KIRIM] "+errMsg, 80)
+	reason := errMsg
+	if reason == "" {
+		reason = "Gagal kirim"
+	}
+	_, err := auditDB.Exec(`
+INSERT INTO chat_threads (phone, nama_outlet, nomer_invoice, last_blast_id, last_message_at, last_message_preview, last_message_direction, status, assigned_email, assigned_name, unread_count, current_attempt, last_attempt_at, attempt1_failed, rejected_at, reject_reason, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, 'out', 'rejected', NULL, NULL, 0, 1, ?, 1, ?, ?, ?)
+ON CONFLICT(phone) DO UPDATE SET
+	nama_outlet = COALESCE(NULLIF(excluded.nama_outlet, ''), nama_outlet),
+	nomer_invoice = COALESCE(NULLIF(excluded.nomer_invoice, ''), nomer_invoice),
+	last_blast_id = COALESCE(excluded.last_blast_id, last_blast_id),
+	last_message_at = excluded.last_message_at,
+	last_message_preview = excluded.last_message_preview,
+	last_message_direction = 'out',
+	status = CASE WHEN status IN ('open','in_progress','on_going','done') THEN status ELSE 'rejected' END,
+	attempt1_failed = CASE WHEN status IN ('open','in_progress','on_going','done') THEN attempt1_failed ELSE 1 END,
+	current_attempt = CASE WHEN status IN ('open','in_progress','on_going','done') THEN current_attempt ELSE 1 END,
+	rejected_at = CASE WHEN status IN ('open','in_progress','on_going','done') THEN rejected_at ELSE excluded.rejected_at END,
+	reject_reason = CASE WHEN status IN ('open','in_progress','on_going','done') THEN reject_reason ELSE excluded.reject_reason END,
+	updated_at = excluded.updated_at`,
+		phone, namaOutlet, nomerInvoice, nullableID(blastID), tsStr, prev, tsStr, tsStr, reason, tsStr)
 	return err
 }
 
