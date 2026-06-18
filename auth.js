@@ -71,6 +71,19 @@ function cookieOpts(req, maxAgeSec) {
   };
 }
 
+// clearOpts — atribut untuk MENGHAPUS cookie. WAJIB sama dgn saat set (path + sameSite
+// + secure), kalau tidak browser mengabaikan Set-Cookie penghapus di konteks cross-site
+// (frontend Pages → backend tunnel) → logout tidak jalan / tetap login.
+function clearOpts(req) {
+  const secure = isSecureRequest(req);
+  return {
+    path: '/',
+    httpOnly: true,
+    secure,
+    sameSite: secure ? 'none' : 'lax',
+  };
+}
+
 function parseCookies(req) {
   const header = req.headers.cookie || '';
   const out = {};
@@ -181,7 +194,7 @@ async function handleCallback(req, res) {
   if (!stateC || stateC !== q.state) {
     return renderAuthError(res, 'State OAuth tidak valid. Coba login ulang.');
   }
-  res.clearCookie(STATE_COOKIE, { path: '/' });
+  res.clearCookie(STATE_COOKIE, clearOpts(req));
 
   try {
     const { tokens } = await oauthClient.getToken(q.code);
@@ -214,7 +227,7 @@ async function handleCallback(req, res) {
 }
 
 function handleAuthLogout(req, res) {
-  res.clearCookie(SESSION_COOKIE, { path: '/' });
+  res.clearCookie(SESSION_COOKIE, clearOpts(req));
   if (req.method === 'POST') {
     res.json({ ok: true });
     return;
