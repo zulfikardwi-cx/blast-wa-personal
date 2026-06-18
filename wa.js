@@ -173,12 +173,26 @@ function extractIncoming(msg) {
   }
 }
 
-// resolvePhone — ambil nomor (62xxx) dari pesan masuk. Untuk DM normal from = 62xxx@c.us.
-// Untuk akun ber-LID (from = xxxx@lid) fallback ke contact.number.
+// resolvePhone — ambil nomor asli (62xxx) dari pesan masuk.
+//   - DM normal: from = 62xxx@c.us → langsung.
+//   - LID (privacy WA terbaru): from = <acak>@lid → resolve ke PN via API resmi
+//     client.getContactLidAndPhone([lid]) → { lid, pn }. Tanpa ini, nomor yang kebaca
+//     adalah angka LID acak (mis. 18649033228449) yang tidak match thread → reply
+//     customer tidak masuk Inbox. (Padanan resolveSenderPhone/GetPNForLID di versi Go.)
 async function resolvePhone(msg) {
   if (msg.from && msg.from.endsWith('@c.us')) {
     return digitsOnly(msg.from.replace('@c.us', ''));
   }
+  if (msg.from && msg.from.endsWith('@lid')) {
+    try {
+      const res = await client.getContactLidAndPhone([msg.from]);
+      const pn = res && res[0] && res[0].pn;
+      if (pn) return digitsOnly(pn.replace('@c.us', ''));
+    } catch (e) {
+      console.log('warn: getContactLidAndPhone gagal untuk', msg.from, ':', e.message);
+    }
+  }
+  // fallback terakhir: contact.number (kadang sudah ter-resolve ke PN)
   try {
     const c = await msg.getContact();
     if (c && c.number) return digitsOnly(c.number);
