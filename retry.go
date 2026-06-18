@@ -43,6 +43,14 @@ func startRetryScheduler() {
 		log.Printf("retry scheduler: LoadLocation Asia/Jakarta gagal (%v), fallback fixed UTC+7", err)
 	}
 
+	// Saklar pause auto-cron. RETRY_ENABLED=false → burst Attempt 2/3 jam-9 MATI
+	// (mencegah ban berulang). Endpoint force manual /api/retry/run-now TETAP jalan,
+	// karena memanggil processRetries langsung (tidak lewat goroutine ini).
+	if !boolEnv("RETRY_ENABLED", true) {
+		log.Println("retry scheduler: DISABLED (RETRY_ENABLED=false) — auto-cron jam-9 MATI. Force manual tetap bisa.")
+		return
+	}
+
 	log.Printf("retry scheduler: interval=%dm window=%02d:00 WIB jitter=%d-%ds (max 1x/hari per thread)",
 		retryIntervalMin, retryWindowHour, retryMinJitter, retryMaxJitter)
 
@@ -246,6 +254,14 @@ func sendRetryOne(phone, body string) error {
 	msg := &waProto.Message{Conversation: proto.String(body)}
 	_, err = state.client.SendMessage(ctx, jid, msg)
 	return err
+}
+
+func boolEnv(key string, def bool) bool {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	return v == "true" || v == "1" || v == "yes" || v == "on"
 }
 
 func atoiEnv(key string, def int) int {
