@@ -398,31 +398,42 @@ $('#signoutBtn').addEventListener('click', async () => {
 });
 
 let progTimer = null;
+
+function renderProgressSnapshot(j) {
+  $('#sTotal').textContent = j.total;
+  $('#sSent').textContent = j.sent;
+  $('#sFailed').textContent = j.failed;
+  $('#sPending').textContent = j.total - j.sent - j.failed - j.skipped;
+  const tb = $('#progTable tbody');
+  tb.innerHTML = '';
+  j.items.forEach((it,i) => {
+    const tr = document.createElement('tr');
+    const cls = { pending:'b-pending', sent:'b-sent', failed:'b-failed', skipped:'b-skipped' }[it.status] || 'b-pending';
+    tr.innerHTML = `
+      <td>${i+1}</td>
+      <td>${esc(it.phone)}</td>
+      <td>${esc(it.nama_outlet||'')}</td>
+      <td>${esc(it.nomer_invoice||'')}</td>
+      <td><span class="badge ${cls}">${it.status}</span></td>
+      <td class="truncate" title="${esc(it.message||it.error||'')}">${it.error ? '<span class="err">'+esc(it.error)+'</span>' : esc((it.message||'').slice(0,80))}</td>
+      <td>${it.sent_at ? new Date(it.sent_at).toLocaleTimeString() : ''}</td>`;
+    tb.appendChild(tr);
+  });
+}
+
+async function fetchAndRenderProgress() {
+  const r = await apiFetch('/api/progress').then(r => r.json());
+  if (!r.job) return null;
+  renderProgressSnapshot(r.job);
+  return r.job;
+}
+
 function pollProgress() {
   if (progTimer) return;
+  fetchAndRenderProgress(); // render segera, jangan tunggu tick pertama
   progTimer = setInterval(async () => {
-    const r = await apiFetch('/api/progress').then(r => r.json());
-    if (!r.job) return;
-    const j = r.job;
-    $('#sTotal').textContent = j.total;
-    $('#sSent').textContent = j.sent;
-    $('#sFailed').textContent = j.failed;
-    $('#sPending').textContent = j.total - j.sent - j.failed - j.skipped;
-    const tb = $('#progTable tbody');
-    tb.innerHTML = '';
-    j.items.forEach((it,i) => {
-      const tr = document.createElement('tr');
-      const cls = { pending:'b-pending', sent:'b-sent', failed:'b-failed', skipped:'b-skipped' }[it.status] || 'b-pending';
-      tr.innerHTML = `
-        <td>${i+1}</td>
-        <td>${esc(it.phone)}</td>
-        <td>${esc(it.nama_outlet||'')}</td>
-        <td>${esc(it.nomer_invoice||'')}</td>
-        <td><span class="badge ${cls}">${it.status}</span></td>
-        <td class="truncate" title="${esc(it.message||it.error||'')}">${it.error ? '<span class="err">'+esc(it.error)+'</span>' : esc((it.message||'').slice(0,80))}</td>
-        <td>${it.sent_at ? new Date(it.sent_at).toLocaleTimeString() : ''}</td>`;
-      tb.appendChild(tr);
-    });
+    const j = await fetchAndRenderProgress();
+    if (!j) return;
     if (!j.running) {
       clearInterval(progTimer); progTimer = null;
       $('#startBtn').disabled = false;
@@ -430,6 +441,22 @@ function pollProgress() {
       loadHistory();
     }
   }, 1500);
+}
+
+// restoreProgress — dipanggil saat halaman dibuka/refresh. Backend menyimpan job aktif
+// di memori (/api/progress), jadi progress tetap tampil & lanjut sampai selesai meski
+// halaman di-refresh atau pindah tab. Hilang hanya kalau backend di-restart.
+async function restoreProgress() {
+  try {
+    const j = await fetchAndRenderProgress();
+    if (!j) return;
+    if (j.running) {
+      $('#startBtn').disabled = true;
+      pollProgress();
+    } else {
+      $('#cancelBtn').style.display = '';
+    }
+  } catch (e) { /* ignore */ }
 }
 
 $('#cancelBtn').addEventListener('click', () => {
@@ -640,6 +667,7 @@ loadMe().then(() => {
     loadTemplates();
     pollUnread();
     setInterval(pollUnread, 8000);
+    restoreProgress(); // pulihkan progress blast yang sedang/baru berjalan
   }
 });
 </script>
