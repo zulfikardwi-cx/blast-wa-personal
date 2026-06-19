@@ -70,7 +70,8 @@ SELECT
 	COALESCE(r.error, ''),
 	COALESCE(r.sent_at, ''),
 	COALESCE(r.message, ''),
-	r.blast_log_id
+	r.blast_log_id,
+	COALESCE(b.attempt, 1)
 FROM blast_recipients r
 JOIN blast_logs b ON r.blast_log_id = b.id
 ORDER BY r.id ASC`)
@@ -84,6 +85,7 @@ ORDER BY r.id ASC`)
 		"Waktu Blast",
 		"User",
 		"Email",
+		"Attempt",
 		"Phone",
 		"Nama Outlet",
 		"Nomor Invoice",
@@ -98,13 +100,14 @@ ORDER BY r.id ASC`)
 	for rows.Next() {
 		var startedAt, userName, userEmail, phone, namaOutlet, nomerInv, status, errMsg, sentAt, message string
 		var blastID int64
-		if err := rows.Scan(&startedAt, &userName, &userEmail, &phone, &namaOutlet, &nomerInv, &status, &errMsg, &sentAt, &message, &blastID); err != nil {
+		var attempt int
+		if err := rows.Scan(&startedAt, &userName, &userEmail, &phone, &namaOutlet, &nomerInv, &status, &errMsg, &sentAt, &message, &blastID, &attempt); err != nil {
 			continue
 		}
 		// Excel/Sheets butuh phone sebagai string supaya tidak di-convert ke scientific notation
 		// → prefix ' agar Sheets treat as text.
 		values = append(values, []any{
-			startedAt, userName, userEmail, "'" + phone, namaOutlet, nomerInv, status, errMsg, sentAt, message, blastID,
+			startedAt, userName, userEmail, attempt, "'" + phone, namaOutlet, nomerInv, status, errMsg, sentAt, message, blastID,
 		})
 		count++
 	}
@@ -112,8 +115,8 @@ ORDER BY r.id ASC`)
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	// Clear sheet (range A:K cover semua kolom)
-	clearRange := fmt.Sprintf("%s!A:K", sheetName)
+	// Clear sheet (range A:L cover semua kolom — termasuk Attempt)
+	clearRange := fmt.Sprintf("%s!A:L", sheetName)
 	if _, err := sheetsSvc.Spreadsheets.Values.Clear(spreadsheetID, clearRange, &sheets.ClearValuesRequest{}).Context(ctx).Do(); err != nil {
 		httpErr(w, 500, "clear sheet: %v. Pastikan service account punya akses Editor ke spreadsheet.", err)
 		return
