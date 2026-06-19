@@ -138,6 +138,9 @@ func main() {
 	mux.HandleFunc("/api/inbox/reply", corsMiddleware(requireAuth(handleReply)))
 	mux.HandleFunc("/api/inbox/resolve", corsMiddleware(requireAuth(handleResolve)))
 	mux.HandleFunc("/api/inbox/sync-teams", corsMiddleware(requireAuth(handleSyncTeams)))
+	// Media file — TANPA requireAuth (di-load via <img>/<video> lintas-domain), diproteksi
+	// token HMAC di query string (?id=&t=). Lihat media.go.
+	mux.HandleFunc("/api/inbox/media", handleInboxMedia)
 
 	addr := os.Getenv("ADDR")
 	if addr == "" {
@@ -311,6 +314,11 @@ func handleIncomingWA(e *events.Message) {
 	}
 	if err := upsertThreadIncoming(phone, body, e.Info.Timestamp); err != nil {
 		log.Println("warn: upsertThreadIncoming:", err)
+	}
+	// Media (gambar/video/audio/stiker/dokumen) → unduh & simpan async supaya bisa
+	// ditampilkan di chatbox. Jangan blok event handler.
+	if isDownloadableMedia(mediaType) {
+		go downloadAndStoreMedia(e.Info.ID, e.Message, mediaType)
 	}
 	log.Println("  → inbox: incoming from", phone, "—", truncate(body, 40))
 }

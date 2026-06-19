@@ -124,6 +124,11 @@
   .msg.out{background:var(--bubble-out);align-self:flex-end;border-bottom-right-radius:2px}
   .msg.system{background:transparent;align-self:center;color:var(--muted);font-size:11px;font-style:italic;max-width:80%;text-align:center;padding:4px 12px;border:1px dashed var(--line);border-radius:6px;margin:8px 0}
   .msg .media{color:var(--warn);font-style:italic}
+  .msg-media{max-width:240px;max-height:300px;border-radius:8px;display:block;cursor:pointer}
+  video.msg-media{cursor:default}
+  .msg-audio{display:block;max-width:240px}
+  .msg-doc{display:inline-flex;align-items:center;gap:6px;color:var(--teal);text-decoration:none;font-weight:500}
+  .msg-doc:hover{text-decoration:underline}
 
   .reply-box{padding:14px 20px;border-top:1px solid var(--line);background:var(--panel);flex-shrink:0;display:flex;gap:10px;align-items:flex-end}
   .reply-box textarea{flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:10px;padding:10px 14px;font:13px/1.4 inherit;resize:none;min-height:40px;max-height:120px}
@@ -288,6 +293,27 @@ const initials = name => (name||'').split(/\s+/).slice(0,2).map(w=>w[0]||'').joi
 
 function apiFetch(path, opts = {}) {
   return fetch(API_BASE + path, { credentials: 'include', ...opts });
+}
+
+// renderMsgBody — tampilkan isi pesan; kalau media sudah terunduh (media_url ada) render
+// inline sesuai tipe. Kalau media tapi belum terunduh → placeholder teks (mis. "[Gambar]").
+function renderMsgBody(m) {
+  if (m.media_url) {
+    const src = API_BASE + m.media_url;
+    if (m.media_type === 'image' || m.media_type === 'sticker') {
+      return `<img class="msg-media" src="${src}" alt="${esc(m.body)}" loading="lazy" onclick="window.open('${src}','_blank')">`;
+    }
+    if (m.media_type === 'video') {
+      return `<video class="msg-media" src="${src}" controls preload="metadata"></video>`;
+    }
+    if (m.media_type === 'audio') {
+      return `<audio class="msg-audio" src="${src}" controls preload="none"></audio>`;
+    }
+    // dokumen / lainnya → link unduh
+    return `<a class="msg-doc" href="${src}" target="_blank" rel="noopener">📄 ${esc(m.body || 'Dokumen')}</a>`;
+  }
+  if (m.is_media) return '<span class="media">' + esc(m.body) + '</span>';
+  return esc(m.body);
 }
 
 function showApiErr(msg) { $('#apiErrBanner').textContent = msg; $('#apiErrBanner').style.display = 'block'; }
@@ -465,8 +491,7 @@ async function loadMessages(scrollBottom) {
       div.className = 'msg ' + m.direction;
       const timeStr = d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
       const sender = m.direction === 'out' && m.sender_name ? esc(m.sender_name) : (m.direction === 'in' ? 'User' : 'Blast');
-      const bodyHtml = m.is_media ? '<span class="media">'+esc(m.body)+'</span>' : esc(m.body);
-      div.innerHTML = bodyHtml + `<div class="meta">${sender} · ${timeStr}</div>`;
+      div.innerHTML = renderMsgBody(m) + `<div class="meta">${sender} · ${timeStr}</div>`;
       list.appendChild(div);
     });
     if (scrollBottom) list.scrollTop = list.scrollHeight;

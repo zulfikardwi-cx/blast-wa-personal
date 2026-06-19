@@ -87,6 +87,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_wa_id ON chat_messages(wa_message
 		}
 	}
 
+	// Migrasi: kolom media_path di chat_messages (path file media yang sudah diunduh).
+	if _, e := auditDB.Exec(`ALTER TABLE chat_messages ADD COLUMN media_path TEXT`); e != nil && !strings.Contains(e.Error(), "duplicate column") {
+		return e
+	}
+
 	if err := backfillFailedThreads(); err != nil {
 		// non-fatal: backfill best-effort, jangan halangi startup
 		fmt.Println("warn: backfillFailedThreads:", err)
@@ -500,6 +505,7 @@ type MessageRow struct {
 	Body        string `json:"body"`
 	IsMedia     bool   `json:"is_media"`
 	MediaType   string `json:"media_type"`
+	MediaURL    string `json:"media_url"` // path media (frontend prepend API_BASE); "" kalau belum/ tidak ada
 	Timestamp   string `json:"timestamp"`
 	SenderEmail string `json:"sender_email"`
 	SenderName  string `json:"sender_name"`
@@ -511,7 +517,7 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 400, "phone required")
 		return
 	}
-	rows, err := auditDB.Query(`SELECT id, direction, COALESCE(body,''), is_media, COALESCE(media_type,''), timestamp, COALESCE(sender_email,''), COALESCE(sender_name,'') FROM chat_messages WHERE phone = ? ORDER BY id ASC LIMIT 500`, phone)
+	rows, err := auditDB.Query(`SELECT id, direction, COALESCE(body,''), is_media, COALESCE(media_type,''), COALESCE(media_path,''), timestamp, COALESCE(sender_email,''), COALESCE(sender_name,'') FROM chat_messages WHERE phone = ? ORDER BY id ASC LIMIT 500`, phone)
 	if err != nil {
 		httpErr(w, 500, "query: %v", err)
 		return
@@ -521,10 +527,15 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var m MessageRow
 		var isMedia int
-		if err := rows.Scan(&m.ID, &m.Direction, &m.Body, &isMedia, &m.MediaType, &m.Timestamp, &m.SenderEmail, &m.SenderName); err != nil {
+		var mediaPath string
+		if err := rows.Scan(&m.ID, &m.Direction, &m.Body, &isMedia, &m.MediaType, &mediaPath, &m.Timestamp, &m.SenderEmail, &m.SenderName); err != nil {
 			continue
 		}
 		m.IsMedia = isMedia == 1
+		// Hanya kasih media_url kalau file-nya sudah benar-benar terunduh & tersimpan.
+		if mediaPath != "" {
+			m.MediaURL = mediaURLPath(m.ID)
+		}
 		out = append(out, m)
 	}
 
