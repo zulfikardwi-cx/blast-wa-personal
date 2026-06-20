@@ -74,6 +74,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_wa_id ON chat_messages(wa_message
 		// (Attempt 1 gagal, atau Attempt 3 tanpa respons s/d jam reject) → kolom Rejected.
 		{"attempt1_failed", "INTEGER NOT NULL DEFAULT 0"},
 		{"rejected_at", "TEXT"},
+		// followup_at: tanggal follow-up untuk thread berstatus 'scheduled' (validasi hari lain).
+		{"followup_at", "TEXT"},
 		// reject_reason: alasan reject untuk ditampilkan di kolom Info/Alasan Log Status
 		// Update — mis. "nomor tidak terdaftar di WhatsApp" (Attempt 1 gagal) atau
 		// "Tidak ada respons s/d 16:00 WIB" (Attempt 3).
@@ -422,6 +424,7 @@ type ThreadRow struct {
 	AssignedName  string `json:"assigned_name"`
 	Team          string `json:"team"`
 	Area          string `json:"area"`
+	FollowupAt    string `json:"followup_at"`
 }
 
 func handleThreads(w http.ResponseWriter, r *http.Request) {
@@ -446,7 +449,7 @@ func handleThreads(w http.ResponseWriter, r *http.Request) {
 	// Urut by last_message_at (waktu pesan asli), BUKAN updated_at — supaya buka/klik
 	// thread (yang hanya bump updated_at via mark-read) tidak mengubah urutan. Pesan
 	// terbaru tetap di atas; tiebreak phone biar deterministik (stabil saat re-fetch).
-	q := `SELECT phone, COALESCE(nama_outlet,''), COALESCE(last_blast_id,0), COALESCE(last_message_at,''), COALESCE(last_message_preview,''), COALESCE(last_message_direction,''), unread_count, status, COALESCE(assigned_email,''), COALESCE(assigned_name,''), COALESCE(team,''), COALESCE(area,'') FROM chat_threads ` + where + ` ORDER BY last_message_at DESC, phone ASC LIMIT 200`
+	q := `SELECT phone, COALESCE(nama_outlet,''), COALESCE(last_blast_id,0), COALESCE(last_message_at,''), COALESCE(last_message_preview,''), COALESCE(last_message_direction,''), unread_count, status, COALESCE(assigned_email,''), COALESCE(assigned_name,''), COALESCE(team,''), COALESCE(area,''), COALESCE(followup_at,'') FROM chat_threads ` + where + ` ORDER BY last_message_at DESC, phone ASC LIMIT 200`
 
 	rows, err := auditDB.Query(q, qargs...)
 	if err != nil {
@@ -459,7 +462,7 @@ func handleThreads(w http.ResponseWriter, r *http.Request) {
 	totals := map[string]int{"open": 0, "in_progress": 0, "done": 0, "unread": 0}
 	for rows.Next() {
 		var t ThreadRow
-		if err := rows.Scan(&t.Phone, &t.NamaOutlet, &t.LastBlastID, &t.LastMessageAt, &t.LastPreview, &t.LastDirection, &t.UnreadCount, &t.Status, &t.AssignedEmail, &t.AssignedName, &t.Team, &t.Area); err != nil {
+		if err := rows.Scan(&t.Phone, &t.NamaOutlet, &t.LastBlastID, &t.LastMessageAt, &t.LastPreview, &t.LastDirection, &t.UnreadCount, &t.Status, &t.AssignedEmail, &t.AssignedName, &t.Team, &t.Area, &t.FollowupAt); err != nil {
 			continue
 		}
 		out = append(out, t)
@@ -542,8 +545,8 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// fetch thread meta
-	var nama, status, assignedEmail, assignedName string
-	_ = auditDB.QueryRow(`SELECT COALESCE(nama_outlet,''), status, COALESCE(assigned_email,''), COALESCE(assigned_name,'') FROM chat_threads WHERE phone = ?`, phone).Scan(&nama, &status, &assignedEmail, &assignedName)
+	var nama, status, assignedEmail, assignedName, followupAt string
+	_ = auditDB.QueryRow(`SELECT COALESCE(nama_outlet,''), status, COALESCE(assigned_email,''), COALESCE(assigned_name,''), COALESCE(followup_at,'') FROM chat_threads WHERE phone = ?`, phone).Scan(&nama, &status, &assignedEmail, &assignedName, &followupAt)
 
 	writeJSON(w, map[string]any{
 		"phone":            phone,
@@ -551,6 +554,7 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 		"status":           status,
 		"assigned_email":   assignedEmail,
 		"assigned_name":    assignedName,
+		"followup_at":      followupAt,
 		"messages":         out,
 		"closing_template": renderClosingTemplate(nama),
 	})
@@ -608,8 +612,16 @@ func handleSetStatus(w http.ResponseWriter, r *http.Request) {
 		assignedName = sql.NullString{}
 	}
 
-	if _, err := auditDB.Exec(`UPDATE chat_threads SET status = ?, assigned_email = ?, assigned_name = ?, updated_at = datetime('now') WHERE phone = ?`,
-		status, assignedEmail, assignedName, phone); err != nil {
+	// followup_at hanya untuk 'scheduled' (tanggal kapan perlu follow-up). Status lain → NULL.
+	var followup sql.NullString
+	if status == "scheduled" {
+		if f := strings.TrimSpace(r.FormValue("followup_at")); f != "" {
+			followup = sql.NullString{String: f, Valid: true}
+		}
+	}
+
+	if _, err := auditDB.Exec(`UPDATE chat_threads SET status = ?, assigned_email = ?, assigned_name = ?, followup_at = ?, updated_at = datetime('now') WHERE phone = ?`,
+		status, assignedEmail, assignedName, followup, phone); err != nil {
 		httpErr(w, 500, "update: %v", err)
 		return
 	}

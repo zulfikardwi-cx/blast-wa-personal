@@ -115,6 +115,18 @@
   .chat-header button.ongoing-btn:hover{background:rgba(167,139,250,.12)}
   .chat-header button.sched-btn{color:#22d3ee;border-color:rgba(34,211,238,.5)}
   .chat-header button.sched-btn:hover{background:rgba(34,211,238,.12)}
+  .h-followup{font-size:12px;color:#22d3ee;font-weight:600;margin-top:2px}
+  .thread-item .followup{color:#22d3ee;font-size:11px;font-weight:600;margin-top:4px}
+  /* modal jadwal follow-up */
+  .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:200}
+  .modal{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px;width:340px;max-width:90vw}
+  .modal h3{margin:0 0 6px;font-size:15px}
+  .modal p{margin:0 0 14px;font-size:12px;color:var(--muted);line-height:1.5}
+  .modal input[type=date]{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px;font:13px inherit;color-scheme:dark}
+  .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+  .modal-actions button{padding:9px 16px;border-radius:8px;border:0;cursor:pointer;font-weight:600;font-size:13px}
+  .modal-actions .save{background:#22d3ee;color:#06222a}
+  .modal-actions .cancel{background:transparent;color:var(--text);border:1px solid var(--line)}
   .chat-header button.reopen-btn{border-color:var(--blue);color:var(--blue)}
   .chat-header button.reopen-btn:hover{background:var(--blue);color:#fff}
   .chat-header button:hover:not(.done-btn):not(.reopen-btn){background:var(--panel2)}
@@ -261,6 +273,7 @@
           <div class="h-name" id="hName">—</div>
           <div class="h-phone" id="hPhone">—</div>
           <div class="h-assign" id="hAssign" style="display:none"></div>
+          <div class="h-followup" id="hFollowup" style="display:none"></div>
         </div>
         <div class="actions">
           <button class="reopen-btn" id="actReopen" style="display:none">↺ Reopen</button>
@@ -282,6 +295,17 @@
 </main>
 
 <div class="toast" id="toast"></div>
+<div class="modal-backdrop" id="schedModal" style="display:none">
+  <div class="modal">
+    <h3>📅 Jadwalkan Follow-up</h3>
+    <p>Pilih tanggal kapan customer ini perlu di-follow-up kembali (mis. sesuai permintaan validasi di hari lain). Thread dikecualikan dari auto-blast attempt berikutnya.</p>
+    <input type="date" id="schedDateInput">
+    <div class="modal-actions">
+      <button class="cancel" id="schedCancel">Batal</button>
+      <button class="save" id="schedSave">Simpan</button>
+    </div>
+  </div>
+</div>
 
 <script>
 const API_BASE = (window.APP_CONFIG && window.APP_CONFIG.API_BASE) || '';
@@ -420,6 +444,7 @@ function renderThreadList() {
         <div class="preview">${esc(previewPrefix + (t.last_preview || ''))}</div>
         <span class="status-tag ${t.status}">${esc(bucketLabels[t.status]||t.status)}</span>
         ${t.team ? '<span class="team-tag">'+esc(t.team)+'</span>' : ''}
+        ${t.status === 'scheduled' && t.followup_at ? '<div class="followup">📅 Follow-up: '+esc(fmtDate(t.followup_at))+'</div>' : ''}
       </div>
       ${t.unread_count > 0 ? '<span class="unread">'+t.unread_count+'</span>' : ''}`;
     div.addEventListener('click', () => selectThread(t.phone));
@@ -454,6 +479,12 @@ async function loadMessages(scrollBottom) {
       $('#hAssign').style.display = '';
     } else {
       $('#hAssign').style.display = 'none';
+    }
+    if (r.status === 'scheduled' && r.followup_at) {
+      $('#hFollowup').textContent = '📅 Follow-up: ' + fmtDate(r.followup_at);
+      $('#hFollowup').style.display = '';
+    } else {
+      $('#hFollowup').style.display = 'none';
     }
 
     // Action buttons & reply lock. done/invalid = terminal (terkunci, bisa Reopen).
@@ -564,18 +595,43 @@ $('#actOnGoing').addEventListener('click', async () => {
 // Scheduled — customer minta validasi di hari lain. Tidak kirim pesan. Keluar dari antrian
 // auto-retry (cron & manual cuma proses after_blast + in_progress) supaya tidak ter-blast
 // attempt berikutnya. Sticky sampai Done/Invalid/Reopen.
-$('#actScheduled').addEventListener('click', async () => {
+// Format tanggal "YYYY-MM-DD" → "24 Jun 2026" (id-ID). "" kalau kosong/invalid.
+function fmtDate(s) {
+  if (!s) return '';
+  const d = new Date(s.slice(0, 10) + 'T00:00:00');
+  if (isNaN(d)) return s;
+  return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+let schedPendingPhone = null;
+$('#actScheduled').addEventListener('click', () => {
   if (!currentPhone) return;
-  $('#actScheduled').disabled = true;
+  schedPendingPhone = currentPhone;
+  // default: besok
+  const d = new Date(); d.setDate(d.getDate() + 1);
+  $('#schedDateInput').value = d.toISOString().slice(0, 10);
+  $('#schedModal').style.display = 'flex';
+});
+$('#schedCancel').addEventListener('click', () => { $('#schedModal').style.display = 'none'; });
+$('#schedModal').addEventListener('click', (e) => { if (e.target.id === 'schedModal') $('#schedModal').style.display = 'none'; });
+$('#schedSave').addEventListener('click', async () => {
+  const date = $('#schedDateInput').value;
+  if (!date) { alert('Pilih tanggal follow-up dulu.'); return; }
+  const phone = schedPendingPhone || currentPhone;
+  if (!phone) return;
+  $('#schedSave').disabled = true;
   try {
-    const fd = new FormData(); fd.append('status', 'scheduled');
-    const r = await apiFetch(`/api/inbox/status?phone=${encodeURIComponent(currentPhone)}`, { method: 'POST', body: fd });
+    const fd = new FormData();
+    fd.append('status', 'scheduled');
+    fd.append('followup_at', date);
+    const r = await apiFetch(`/api/inbox/status?phone=${encodeURIComponent(phone)}`, { method: 'POST', body: fd });
     if (!r.ok) { alert('Gagal: ' + await r.text()); return; }
-    toast('📅 Dijadwalkan validasi lain hari — dikecualikan dari auto-blast attempt berikutnya.');
+    $('#schedModal').style.display = 'none';
+    toast('📅 Dijadwalkan follow-up ' + fmtDate(date) + ' — dikecualikan dari auto-blast attempt berikutnya.');
     await loadMessages(false);
     loadThreads();
   } finally {
-    $('#actScheduled').disabled = false;
+    $('#schedSave').disabled = false;
   }
 });
 
