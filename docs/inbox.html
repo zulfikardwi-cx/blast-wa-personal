@@ -152,6 +152,15 @@
   .reply-box button:disabled{opacity:.5;cursor:not-allowed}
   .reply-box.locked{opacity:.5;pointer-events:none}
   .reply-box.locked textarea{cursor:not-allowed}
+  /* macro quick-reply */
+  .macro-wrap{position:relative;flex-shrink:0}
+  .reply-box .macro-btn{background:var(--panel2);border:1px solid var(--line);color:var(--teal);padding:0;width:42px;height:40px;border-radius:10px;font-size:17px;font-weight:400}
+  .reply-box .macro-btn:hover{background:var(--line)}
+  .macro-menu{position:absolute;bottom:50px;left:0;width:360px;max-height:340px;overflow-y:auto;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 34px rgba(0,0,0,.55);z-index:120;padding:6px}
+  .macro-item{padding:9px 11px;border-radius:7px;cursor:pointer}
+  .macro-item:hover{background:var(--panel2)}
+  .macro-item .mt{font-weight:600;color:var(--teal);font-size:12px;display:block;margin-bottom:2px}
+  .macro-item .mp{color:var(--muted);font-size:11px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
   .no-thread{flex:1;display:flex;align-items:center;justify-content:center;color:var(--muted);text-align:center;padding:40px;flex-direction:column;gap:8px}
   .no-thread .icon{font-size:64px;opacity:.4}
@@ -287,6 +296,10 @@
       <div class="messages" id="messages"></div>
 
       <div class="reply-box" id="replyBox">
+        <div class="macro-wrap">
+          <button id="macroBtn" class="macro-btn" title="Sisipkan template macro">⚡</button>
+          <div class="macro-menu" id="macroMenu" style="display:none"></div>
+        </div>
         <textarea id="replyText" placeholder="Tulis balasan..." rows="1"></textarea>
         <button id="sendBtn">Kirim</button>
       </div>
@@ -645,6 +658,46 @@ $('#actReopen').addEventListener('click', async () => {
   toast('↺ Thread di-reopen ke Open.');
   await loadMessages(false);
   loadThreads();
+});
+
+// ---- Macro quick-reply: sisipkan template ke kotak balasan utk diedit lalu kirim ----
+const MACROS = [
+  { label: 'Validasi sekarang via WA call?',
+    text: 'Baik kak, apakah berkenan kami lakukan validasi sekarang via whatsapp call? mohon konfirmasinya ya kak' },
+  { label: 'Tim validator akan menghubungi (tunggu)',
+    text: 'Baik kak, nantinya tim validator kami akan menghubungi kakak via whatsapp call. Mohon kesediaannya untuk menunggu. Terima kasih' },
+  { label: 'Follow up — belum ada respon validasi',
+    text: 'Halo kak, Mohon maaf sebelumnya tim validator kami sudah mencoba menghubungi untuk proses validasi namun belum ada respon. Mohon konfirmasinya kembali ya kak jika sudah bersedia untuk dilakukan validasi. Terima kasih' },
+  { label: 'Jadwal training',
+    text: 'Halo kak, sesuai informasi sebelumnya, untuk jadwal trainingnya sudah kami jadwalkan pada:\n\nHari/Tanggal :\nPukul : \nTipe Training : Online/Offline\n\nNantinya tim trainer kami akan menghubungi kakak kembali untuk informasi lebih lanjut.\n\nTerima kasih' },
+  { label: 'Konfirmasi aktivasi selesai',
+    text: 'Halo kak, sesuai informasi sebelumnya, untuk aktivasinya sudah selesai kami lakukan dengan data sebagai berikut:\n\nNama Outlet : \nEmail : \nJenis Aktivasi : New/Tambah Cabang\n\nTerima kasih' },
+];
+
+function buildMacroMenu() {
+  const menu = $('#macroMenu');
+  menu.innerHTML = MACROS.map((m, i) =>
+    `<div class="macro-item" data-i="${i}"><span class="mt">${esc(m.label)}</span><span class="mp">${esc(m.text.replace(/\n+/g, ' '))}</span></div>`
+  ).join('');
+  menu.querySelectorAll('.macro-item').forEach(el => {
+    el.addEventListener('click', () => {
+      const ta = $('#replyText');
+      ta.value = MACROS[+el.dataset.i].text;
+      ta.style.height = 'auto';
+      ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
+      ta.focus();
+      menu.style.display = 'none';
+    });
+  });
+}
+$('#macroBtn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const menu = $('#macroMenu');
+  if (menu.style.display === 'none') { buildMacroMenu(); menu.style.display = 'block'; }
+  else { menu.style.display = 'none'; }
+});
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.macro-wrap')) $('#macroMenu').style.display = 'none';
 });
 
 // Reply
