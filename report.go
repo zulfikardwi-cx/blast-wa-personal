@@ -43,14 +43,15 @@ func attStatus(n, current int) string {
 }
 
 // queryUnresponsive — Log Status Update: bucket After Blast + In Progress (belum
-// direspons) PLUS rejected (Attempt 1 gagal kirim, atau Attempt 3 tanpa respons s/d
-// jam reject). after_blast/in_progress keluar saat user balas (→ open) / done / invalid.
-// rejected SENGAJA tetap tampil sebagai catatan untuk tim WO (kolom Rejected = "reject").
+// direspons) PLUS rejected (Attempt 1 gagal kirim) PLUS force_close (Attempt 3 tanpa
+// respons). after_blast/in_progress keluar saat user balas (→ open) / done / invalid.
+// rejected & force_close SENGAJA tetap tampil & tertagging reject — data ini ditarik
+// untuk diproses reject di sistem lain (jangan dihilangkan dari sini).
 func queryUnresponsive() ([]UnresponsiveRow, error) {
 	rows, err := auditDB.Query(`
 SELECT phone, COALESCE(nama_outlet, ''), COALESCE(nomer_invoice, ''), current_attempt, status, COALESCE(attempt1_failed, 0), COALESCE(reject_reason, '')
 FROM chat_threads
-WHERE status IN ('after_blast', 'in_progress', 'rejected')
+WHERE status IN ('after_blast', 'in_progress', 'rejected', 'force_close')
 ORDER BY current_attempt DESC, last_attempt_at ASC`)
 	if err != nil {
 		return nil, err
@@ -68,11 +69,12 @@ ORDER BY current_attempt DESC, last_attempt_at ASC`)
 		if att1Failed == 1 {
 			att1 = "Rejected"
 		}
+		// rejected (gagal Attempt 1) & force_close (Attempt 3 no-response) → tertagging reject.
 		rejected := "-"
 		note := ""
-		if status == "rejected" {
+		if status == "rejected" || status == "force_close" {
 			rejected = "reject"
-			note = reason // alasan: nomor tidak terdaftar / tidak respons s/d 16:00, dll
+			note = reason // alasan: nomor tidak terdaftar / tidak respons s/d 17:00, dll
 		}
 		out = append(out, UnresponsiveRow{
 			Phone:        phone,
