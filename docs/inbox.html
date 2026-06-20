@@ -254,7 +254,7 @@
       <span class="sort">↓ Terbaru</span>
     </div>
     <div class="search-box">
-      <input type="text" id="searchInput" placeholder="Cari outlet, nomor, atau isi chat..." />
+      <input type="text" id="searchInput" placeholder="Cari outlet, nomor, invoice, atau isi chat..." />
     </div>
     <div style="display:flex;gap:8px;padding:0 12px 8px;align-items:center">
       <select id="teamFilter" style="flex:1;font-size:12px;padding:6px;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:6px">
@@ -433,6 +433,7 @@ function renderThreadList() {
     filtered = filtered.filter(t =>
       (t.nama_outlet||'').toLowerCase().includes(s)
       || t.phone.includes(s)
+      || (t.nomer_invoice||'').toLowerCase().includes(s)
       || (t.last_preview||'').toLowerCase().includes(s));
   }
   if (!filtered.length) {

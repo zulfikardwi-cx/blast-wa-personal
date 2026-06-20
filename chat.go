@@ -431,6 +431,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 type ThreadRow struct {
 	Phone         string `json:"phone"`
 	NamaOutlet    string `json:"nama_outlet"`
+	NomerInvoice  string `json:"nomer_invoice"`
 	LastBlastID   int64  `json:"last_blast_id"`
 	LastMessageAt string `json:"last_message_at"`
 	LastPreview   string `json:"last_preview"`
@@ -466,7 +467,7 @@ func handleThreads(w http.ResponseWriter, r *http.Request) {
 	// Urut by last_message_at (waktu pesan asli), BUKAN updated_at — supaya buka/klik
 	// thread (yang hanya bump updated_at via mark-read) tidak mengubah urutan. Pesan
 	// terbaru tetap di atas; tiebreak phone biar deterministik (stabil saat re-fetch).
-	q := `SELECT phone, COALESCE(nama_outlet,''), COALESCE(last_blast_id,0), COALESCE(last_message_at,''), COALESCE(last_message_preview,''), COALESCE(last_message_direction,''), unread_count, status, COALESCE(assigned_email,''), COALESCE(assigned_name,''), COALESCE(team,''), COALESCE(area,''), COALESCE(followup_at,'') FROM chat_threads ` + where + ` ORDER BY last_message_at DESC, phone ASC LIMIT 200`
+	q := `SELECT phone, COALESCE(nama_outlet,''), COALESCE(nomer_invoice,''), COALESCE(last_blast_id,0), COALESCE(last_message_at,''), COALESCE(last_message_preview,''), COALESCE(last_message_direction,''), unread_count, status, COALESCE(assigned_email,''), COALESCE(assigned_name,''), COALESCE(team,''), COALESCE(area,''), COALESCE(followup_at,'') FROM chat_threads ` + where + ` ORDER BY last_message_at DESC, phone ASC LIMIT 200`
 
 	rows, err := auditDB.Query(q, qargs...)
 	if err != nil {
@@ -479,7 +480,7 @@ func handleThreads(w http.ResponseWriter, r *http.Request) {
 	totals := map[string]int{"open": 0, "in_progress": 0, "done": 0, "unread": 0}
 	for rows.Next() {
 		var t ThreadRow
-		if err := rows.Scan(&t.Phone, &t.NamaOutlet, &t.LastBlastID, &t.LastMessageAt, &t.LastPreview, &t.LastDirection, &t.UnreadCount, &t.Status, &t.AssignedEmail, &t.AssignedName, &t.Team, &t.Area, &t.FollowupAt); err != nil {
+		if err := rows.Scan(&t.Phone, &t.NamaOutlet, &t.NomerInvoice, &t.LastBlastID, &t.LastMessageAt, &t.LastPreview, &t.LastDirection, &t.UnreadCount, &t.Status, &t.AssignedEmail, &t.AssignedName, &t.Team, &t.Area, &t.FollowupAt); err != nil {
 			continue
 		}
 		out = append(out, t)
