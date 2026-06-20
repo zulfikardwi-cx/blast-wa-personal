@@ -262,10 +262,13 @@ WHERE status IN ('after_blast', 'in_progress')
 func processRejectSweep() {
 	now := time.Now().In(wibLoc)
 
+	// HANYA after_blast: thread yang BENAR-BENAR tak pernah ada interaksi. JANGAN sertakan
+	// in_progress — itu berarti sudah dibalas customer & sedang ditangani agen; kalau
+	// di-reject, thread hilang dari inbox padahal aktif dikerjakan.
 	rows, err := auditDB.Query(`
 SELECT phone, COALESCE(last_attempt_at, '')
 FROM chat_threads
-WHERE status IN ('after_blast', 'in_progress') AND current_attempt >= 3`)
+WHERE status = 'after_blast' AND current_attempt >= 3`)
 	if err != nil {
 		log.Printf("reject-sweep: query error: %v", err)
 		return
@@ -301,7 +304,7 @@ WHERE status IN ('after_blast', 'in_progress') AND current_attempt >= 3`)
 		// Guard status di WHERE: kalau balasan masuk antara query & update (→ 'open'),
 		// jangan timpa.
 		reason := fmt.Sprintf("Tidak ada respons s/d %02d:00 WIB (Attempt 3)", retryRejectHour)
-		res, err := auditDB.Exec(`UPDATE chat_threads SET status='rejected', rejected_at=?, reject_reason=?, updated_at=datetime('now') WHERE phone=? AND status IN ('after_blast','in_progress') AND current_attempt >= 3`,
+		res, err := auditDB.Exec(`UPDATE chat_threads SET status='rejected', rejected_at=?, reject_reason=?, updated_at=datetime('now') WHERE phone=? AND status='after_blast' AND current_attempt >= 3`,
 			now.Format(time.RFC3339), reason, r.phone)
 		if err != nil {
 			log.Printf("reject-sweep: update %s error: %v", r.phone, err)
