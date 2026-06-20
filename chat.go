@@ -99,7 +99,24 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_wa_id ON chat_messages(wa_message
 		fmt.Println("warn: backfillFailedThreads:", err)
 	}
 	fixupBackfillRetryLogs()
+	migrateRejectedAttempt3ToForceClose()
 	return nil
+}
+
+// migrateRejectedAttempt3ToForceClose — pindahkan thread lama yang di-'reject' karena
+// Attempt 3 tanpa respons (attempt1_failed=0) ke bucket 'force_close', sesuai perubahan
+// aturan (auto-close Attempt 3 → Force Close, bukan rejected). Thread 'rejected' karena
+// GAGAL kirim Attempt 1 (attempt1_failed=1) TIDAK disentuh — tetap rejected utk tim WO.
+// Idempoten: setelah jalan, tak ada lagi rejected+attempt1_failed=0 → run berikutnya no-op.
+func migrateRejectedAttempt3ToForceClose() {
+	res, err := auditDB.Exec(`UPDATE chat_threads SET status='force_close', updated_at=datetime('now') WHERE status='rejected' AND COALESCE(attempt1_failed,0)=0`)
+	if err != nil {
+		fmt.Println("warn: migrateRejectedAttempt3ToForceClose:", err)
+		return
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		fmt.Printf("migrasi: %d thread rejected (Attempt 3) → force_close\n", n)
+	}
 }
 
 // fixupBackfillRetryLogs — betulkan entri Riwayat hasil backfill retry lama: isi kolom

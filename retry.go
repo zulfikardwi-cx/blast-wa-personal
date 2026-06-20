@@ -22,7 +22,7 @@ var (
 	retryRunning     bool
 	retryIntervalMin int
 	retryWindowHour  int
-	retryRejectHour  int
+	forceCloseHour   int
 	retryMinJitter   int
 	retryMaxJitter   int
 	retryEnabled     bool
@@ -35,7 +35,7 @@ var (
 func startRetryScheduler() {
 	retryIntervalMin = atoiEnv("RETRY_CHECK_INTERVAL_MINUTES", 30)
 	retryWindowHour = atoiEnv("RETRY_WINDOW_HOUR", 9)
-	retryRejectHour = atoiEnv("RETRY_REJECT_HOUR", 16)
+	forceCloseHour = atoiEnv("RETRY_FORCECLOSE_HOUR", 17)
 	retryMinJitter = atoiEnv("RETRY_SEND_MIN_DELAY", 20)
 	retryMaxJitter = atoiEnv("RETRY_SEND_MAX_DELAY", 40)
 
@@ -48,14 +48,14 @@ func startRetryScheduler() {
 
 	// Saklar pause auto-cron SEND. RETRY_ENABLED=false → burst Attempt 2/3 jam-9 MATI
 	// (mencegah ban berulang). Endpoint force manual /api/retry/run-now TETAP jalan.
-	// CATATAN: reject-sweep (16:00) hanya update DB (tidak kirim pesan) → SELALU jalan,
+	// CATATAN: force-close-sweep (17:00) hanya update DB (tidak kirim pesan) → SELALU jalan,
 	// termasuk saat RETRY_ENABLED=false.
 	retryEnabled = boolEnv("RETRY_ENABLED", true)
 	if !retryEnabled {
-		log.Printf("retry scheduler: SEND DISABLED (RETRY_ENABLED=false) — auto-cron jam-%02d MATI. Reject-sweep %02d:00 & force manual tetap jalan.", retryWindowHour, retryRejectHour)
+		log.Printf("retry scheduler: SEND DISABLED (RETRY_ENABLED=false) — auto-cron jam-%02d MATI. Force-close-sweep %02d:00 & force manual tetap jalan.", retryWindowHour, forceCloseHour)
 	} else {
-		log.Printf("retry scheduler: interval=%dm window=%02d:00 WIB reject=%02d:00 WIB jitter=%d-%ds (max 1x/hari per thread)",
-			retryIntervalMin, retryWindowHour, retryRejectHour, retryMinJitter, retryMaxJitter)
+		log.Printf("retry scheduler: interval=%dm window=%02d:00 WIB force-close=%02d:00 WIB jitter=%d-%ds (max 1x/hari per thread)",
+			retryIntervalMin, retryWindowHour, forceCloseHour, retryMinJitter, retryMaxJitter)
 	}
 
 	go func() {
@@ -70,7 +70,7 @@ func startRetryScheduler() {
 				processRetries(false, 0, 2, "system@retry", "Auto Retry (cron)")
 				processRetries(false, 0, 3, "system@retry", "Auto Retry (cron)")
 			}
-			processRejectSweep()
+			processForceCloseSweep()
 			<-ticker.C
 		}
 	}()
@@ -224,9 +224,9 @@ WHERE status IN ('after_blast', 'in_progress')
 		log.Printf("retry: phone=%s attempt %d sent", r.phone, nextAttempt)
 		if nextAttempt >= 3 {
 			// Attempt 3 (terakhir) terkirim. JANGAN langsung close — beri tenggang sampai
-			// jam reject (16:00 WIB) hari ini. processRejectSweep yang akan menandai
-			// 'rejected' kalau tetap tidak ada respons. Kalau user balas dulu → 'open'.
-			log.Printf("retry: phone=%s attempt 3 terkirim → tunggu respons s/d %02d:00 WIB (reject-sweep)", r.phone, retryRejectHour)
+			// jam force-close (17:00 WIB) hari ini. processForceCloseSweep yang akan memindah
+			// ke 'force_close' kalau tetap tidak tuntas. Kalau customer balas dulu → 'open'.
+			log.Printf("retry: phone=%s attempt 3 terkirim → tunggu respons s/d %02d:00 WIB (force-close-sweep)", r.phone, forceCloseHour)
 		}
 		sent++
 
@@ -253,24 +253,21 @@ WHERE status IN ('after_blast', 'in_progress')
 	log.Printf("retry: batch done — sent=%d failed=%d", sent, failed)
 }
 
-// processRejectSweep — tandai 'rejected' semua nomor yang sudah dikirimi Attempt 3 tapi
-// belum merespons hingga jam RETRY_REJECT_HOUR (default 16:00 WIB) pada HARI Attempt 3
-// dikirim. Hanya update DB (tidak kirim pesan) → aman dijalankan kapan saja, termasuk saat
-// RETRY_ENABLED=false. Begitu user balas → status 'open' → otomatis tidak kena sweep.
-// Status 'rejected' membuat nomor keluar dari antrian auto-retry & tampil di Log Status
-// Update dengan kolom Rejected = "reject".
-func processRejectSweep() {
+// processForceCloseSweep — pindahkan ke bucket 'force_close' semua nomor yang sudah dikirimi
+// Attempt 3 tapi belum tuntas hingga jam RETRY_FORCECLOSE_HOUR (default 17:00 WIB) pada HARI
+// Attempt 3 dikirim. Sasaran: after_blast (tak pernah balas) DAN in_progress (sudah balas
+// lalu diam, sedang ditangani agen) — sesuai keputusan user. Hanya update DB (tidak kirim
+// pesan) → aman jalan kapan saja, termasuk saat RETRY_ENABLED=false. Begitu customer balas
+// (→ 'open') sebelum cutoff, otomatis lepas dari sweep. done/invalid/on_going/scheduled aman.
+func processForceCloseSweep() {
 	now := time.Now().In(wibLoc)
 
-	// HANYA after_blast: thread yang BENAR-BENAR tak pernah ada interaksi. JANGAN sertakan
-	// in_progress — itu berarti sudah dibalas customer & sedang ditangani agen; kalau
-	// di-reject, thread hilang dari inbox padahal aktif dikerjakan.
 	rows, err := auditDB.Query(`
 SELECT phone, COALESCE(last_attempt_at, '')
 FROM chat_threads
-WHERE status = 'after_blast' AND current_attempt >= 3`)
+WHERE status IN ('after_blast', 'in_progress') AND current_attempt >= 3`)
 	if err != nil {
-		log.Printf("reject-sweep: query error: %v", err)
+		log.Printf("force-close-sweep: query error: %v", err)
 		return
 	}
 	type rrow struct{ phone, lastAt string }
@@ -284,7 +281,7 @@ WHERE status = 'after_blast' AND current_attempt >= 3`)
 	}
 	rows.Close()
 
-	rejected := 0
+	closed := 0
 	for _, r := range batch {
 		if r.lastAt == "" {
 			continue
@@ -293,29 +290,29 @@ WHERE status = 'after_blast' AND current_attempt >= 3`)
 		if err != nil {
 			continue
 		}
-		// cutoff = jam reject WIB pada hari Attempt 3 dikirim. now < cutoff → masih ada
-		// kesempatan respons hari ini, skip. (Kalau sweep ketinggalan beberapa hari, hari
-		// Attempt 3 sudah lewat → now pasti > cutoff → tetap ke-reject.)
+		// cutoff = jam force-close WIB pada hari Attempt 3 dikirim. now < cutoff → masih ada
+		// kesempatan respons hari ini, skip. (Kalau sweep ketinggalan beberapa hari → now
+		// pasti > cutoff → tetap di-close.)
 		t3 = t3.In(wibLoc)
-		cutoff := time.Date(t3.Year(), t3.Month(), t3.Day(), retryRejectHour, 0, 0, 0, wibLoc)
+		cutoff := time.Date(t3.Year(), t3.Month(), t3.Day(), forceCloseHour, 0, 0, 0, wibLoc)
 		if now.Before(cutoff) {
 			continue
 		}
-		// Guard status di WHERE: kalau balasan masuk antara query & update (→ 'open'),
+		// Guard status di WHERE: kalau customer balas antara query & update (→ 'open'),
 		// jangan timpa.
-		reason := fmt.Sprintf("Tidak ada respons s/d %02d:00 WIB (Attempt 3)", retryRejectHour)
-		res, err := auditDB.Exec(`UPDATE chat_threads SET status='rejected', rejected_at=?, reject_reason=?, updated_at=datetime('now') WHERE phone=? AND status='after_blast' AND current_attempt >= 3`,
-			now.Format(time.RFC3339), reason, r.phone)
+		reason := fmt.Sprintf("Tidak ada respons s/d %02d:00 WIB (Attempt 3)", forceCloseHour)
+		res, err := auditDB.Exec(`UPDATE chat_threads SET status='force_close', reject_reason=?, updated_at=datetime('now') WHERE phone=? AND status IN ('after_blast','in_progress') AND current_attempt >= 3`,
+			reason, r.phone)
 		if err != nil {
-			log.Printf("reject-sweep: update %s error: %v", r.phone, err)
+			log.Printf("force-close-sweep: update %s error: %v", r.phone, err)
 			continue
 		}
 		if n, _ := res.RowsAffected(); n > 0 {
-			rejected++
+			closed++
 		}
 	}
-	if rejected > 0 {
-		log.Printf("reject-sweep: %d nomor → rejected (Attempt 3 tanpa respons s/d %02d:00 WIB)", rejected, retryRejectHour)
+	if closed > 0 {
+		log.Printf("force-close-sweep: %d nomor → force_close (Attempt 3 tanpa respons s/d %02d:00 WIB)", closed, forceCloseHour)
 	}
 }
 
