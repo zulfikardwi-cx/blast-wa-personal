@@ -367,9 +367,9 @@ UPDATE chat_threads SET
 	last_message_at = ?,
 	last_message_preview = ?,
 	last_message_direction = 'out',
-	status = CASE WHEN status IN ('done','invalid','on_going') THEN status ELSE 'in_progress' END,
-	assigned_email = CASE WHEN status IN ('done','invalid','on_going') THEN assigned_email ELSE ? END,
-	assigned_name = CASE WHEN status IN ('done','invalid','on_going') THEN assigned_name ELSE ? END,
+	status = CASE WHEN status IN ('done','invalid','on_going','scheduled') THEN status ELSE 'in_progress' END,
+	assigned_email = CASE WHEN status IN ('done','invalid','on_going','scheduled') THEN assigned_email ELSE ? END,
+	assigned_name = CASE WHEN status IN ('done','invalid','on_going','scheduled') THEN assigned_name ELSE ? END,
 	updated_at = ?
 WHERE phone = ?`, tsStr, prev, agentEmail, agentName, tsStr, phone)
 	return err
@@ -388,7 +388,7 @@ UPDATE chat_threads SET
 	last_message_preview = ?,
 	last_message_direction = 'in',
 	unread_count = unread_count + 1,
-	status = CASE WHEN status IN ('done','invalid','on_going') THEN status ELSE 'open' END,
+	status = CASE WHEN status IN ('done','invalid','on_going','scheduled') THEN status ELSE 'open' END,
 	updated_at = ?
 WHERE phone = ?`, tsStr, prev, tsStr, phone)
 	return err
@@ -466,7 +466,7 @@ func handleThreads(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// summary counts
-	var cAfter, cOpen, cProg, cOnGoing, cForce, cDone, cInvalid, cUnread int
+	var cAfter, cOpen, cProg, cOnGoing, cForce, cDone, cInvalid, cScheduled, cUnread int
 	_ = auditDB.QueryRow(`SELECT COUNT(*) FROM chat_threads WHERE status = 'after_blast'`).Scan(&cAfter)
 	_ = auditDB.QueryRow(`SELECT COUNT(*) FROM chat_threads WHERE status = 'open'`).Scan(&cOpen)
 	_ = auditDB.QueryRow(`SELECT COUNT(*) FROM chat_threads WHERE status = 'in_progress'`).Scan(&cProg)
@@ -474,6 +474,7 @@ func handleThreads(w http.ResponseWriter, r *http.Request) {
 	_ = auditDB.QueryRow(`SELECT COUNT(*) FROM chat_threads WHERE status = 'force_close'`).Scan(&cForce)
 	_ = auditDB.QueryRow(`SELECT COUNT(*) FROM chat_threads WHERE status = 'done'`).Scan(&cDone)
 	_ = auditDB.QueryRow(`SELECT COUNT(*) FROM chat_threads WHERE status = 'invalid'`).Scan(&cInvalid)
+	_ = auditDB.QueryRow(`SELECT COUNT(*) FROM chat_threads WHERE status = 'scheduled'`).Scan(&cScheduled)
 	_ = auditDB.QueryRow(`SELECT COALESCE(SUM(unread_count), 0) FROM chat_threads`).Scan(&cUnread)
 	totals["after_blast"] = cAfter
 	totals["open"] = cOpen
@@ -482,6 +483,7 @@ func handleThreads(w http.ResponseWriter, r *http.Request) {
 	totals["force_close"] = cForce
 	totals["done"] = cDone
 	totals["invalid"] = cInvalid
+	totals["scheduled"] = cScheduled
 	totals["unread"] = cUnread
 
 	// daftar team (distinct) untuk dropdown filter — lintas semua bucket biar stabil
@@ -589,15 +591,15 @@ func handleSetStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	status := r.FormValue("status")
-	if status != "open" && status != "in_progress" && status != "done" && status != "invalid" && status != "on_going" && status != "force_close" {
-		httpErr(w, 400, "status invalid (open|in_progress|done|invalid|on_going|force_close)")
+	if status != "open" && status != "in_progress" && status != "done" && status != "invalid" && status != "on_going" && status != "force_close" && status != "scheduled" {
+		httpErr(w, 400, "status invalid (open|in_progress|done|invalid|on_going|force_close|scheduled)")
 		return
 	}
 	user, _ := userFromCtx(r.Context())
 
-	// Kalau status in_progress / on_going, auto-assign ke user yang klik (PIC validasi)
+	// Kalau status in_progress / on_going / scheduled, auto-assign ke user yang klik (PIC)
 	var assignedEmail, assignedName sql.NullString
-	if status == "in_progress" || status == "on_going" {
+	if status == "in_progress" || status == "on_going" || status == "scheduled" {
 		assignedEmail = sql.NullString{String: user.Email, Valid: true}
 		assignedName = sql.NullString{String: user.Name, Valid: true}
 	} else {

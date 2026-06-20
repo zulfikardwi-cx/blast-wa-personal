@@ -55,6 +55,7 @@
   .dot.done{background:var(--muted)}
   .dot.invalid{background:var(--danger)}
   .dot.on_going{background:#a78bfa}
+  .dot.scheduled{background:#22d3ee}
   .dot.force_close{background:#64748b}
 
   .user-card{margin-top:auto;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px;font-size:11px;color:var(--muted)}
@@ -112,6 +113,8 @@
   .chat-header button.invalid-btn:hover{background:rgba(239,68,68,.12)}
   .chat-header button.ongoing-btn{color:#a78bfa;border-color:rgba(167,139,250,.5)}
   .chat-header button.ongoing-btn:hover{background:rgba(167,139,250,.12)}
+  .chat-header button.sched-btn{color:#22d3ee;border-color:rgba(34,211,238,.5)}
+  .chat-header button.sched-btn:hover{background:rgba(34,211,238,.12)}
   .chat-header button.reopen-btn{border-color:var(--blue);color:var(--blue)}
   .chat-header button.reopen-btn:hover{background:var(--blue);color:#fff}
   .chat-header button:hover:not(.done-btn):not(.reopen-btn){background:var(--panel2)}
@@ -194,6 +197,11 @@
       <span class="name">On Going</span>
       <span class="count" id="cOnGoing">0</span>
     </button>
+    <button class="bucket-btn" data-bucket="scheduled">
+      <span class="dot scheduled"></span>
+      <span class="name">Scheduled</span>
+      <span class="count" id="cScheduled">0</span>
+    </button>
     <button class="bucket-btn" data-bucket="done">
       <span class="dot done"></span>
       <span class="name">Done</span>
@@ -257,6 +265,7 @@
         <div class="actions">
           <button class="reopen-btn" id="actReopen" style="display:none">↺ Reopen</button>
           <button class="ongoing-btn" id="actOnGoing">⏳ On Going</button>
+          <button class="sched-btn" id="actScheduled">📅 Scheduled</button>
           <button class="invalid-btn" id="actInvalid">⚠ Invalid</button>
           <button class="done-btn" id="actDone">✓ Done / Resolved</button>
         </div>
@@ -319,7 +328,7 @@ function renderMsgBody(m) {
 function showApiErr(msg) { $('#apiErrBanner').textContent = msg; $('#apiErrBanner').style.display = 'block'; }
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 2500); }
 
-const bucketLabels = { after_blast:'After Blast', open:'Open', in_progress:'In Progress', on_going:'On Going', force_close:'Force Close', done:'Done', invalid:'Invalid' };
+const bucketLabels = { after_blast:'After Blast', open:'Open', in_progress:'In Progress', on_going:'On Going', scheduled:'Scheduled', force_close:'Force Close', done:'Done', invalid:'Invalid' };
 
 async function loadMe() {
   try {
@@ -359,6 +368,7 @@ async function loadThreads() {
     $('#cOpen').textContent = r.counts.open || 0;
     $('#cProg').textContent = r.counts.in_progress || 0;
     $('#cOnGoing').textContent = r.counts.on_going || 0;
+    $('#cScheduled').textContent = r.counts.scheduled || 0;
     $('#cDone').textContent = r.counts.done || 0;
     $('#cInvalid').textContent = r.counts.invalid || 0;
     $('#cForceClose').textContent = r.counts.force_close || 0;
@@ -450,10 +460,13 @@ async function loadMessages(scrollBottom) {
     const replyBox = $('#replyBox');
     const terminal = (r.status === 'done' || r.status === 'invalid');
     const ongoing = (r.status === 'on_going');
+    const scheduled = (r.status === 'scheduled');
+    const parked = ongoing || scheduled; // keluar antrian retry, tampilkan Reopen
     if (terminal) {
       $('#actDone').style.display = 'none';
       $('#actInvalid').style.display = 'none';
       $('#actOnGoing').style.display = 'none';
+      $('#actScheduled').style.display = 'none';
       $('#actReopen').style.display = '';
       replyBox.classList.add('locked');
       $('#replyText').placeholder = (r.status === 'invalid')
@@ -462,11 +475,13 @@ async function loadMessages(scrollBottom) {
     } else {
       $('#actDone').style.display = '';
       $('#actInvalid').style.display = '';
-      // On Going tampil saat aktif; saat sudah on_going, ganti jadi Reopen (jalan keluar → Open)
+      // On Going / Scheduled tampil saat aktif; saat sudah di status itu → ganti jadi Reopen
       $('#actOnGoing').style.display = ongoing ? 'none' : '';
-      $('#actReopen').style.display = ongoing ? '' : 'none';
+      $('#actScheduled').style.display = scheduled ? 'none' : '';
+      $('#actReopen').style.display = parked ? '' : 'none';
       replyBox.classList.remove('locked');
-      $('#replyText').placeholder = ongoing ? 'Sedang divalidasi (On Going). Tulis balasan...' : 'Tulis balasan...';
+      $('#replyText').placeholder = scheduled ? 'Dijadwalkan validasi lain hari. Tulis balasan...'
+        : (ongoing ? 'Sedang divalidasi (On Going). Tulis balasan...' : 'Tulis balasan...');
     }
 
     const msgs = r.messages || [];
@@ -543,6 +558,24 @@ $('#actOnGoing').addEventListener('click', async () => {
     loadThreads();
   } finally {
     $('#actOnGoing').disabled = false;
+  }
+});
+
+// Scheduled — customer minta validasi di hari lain. Tidak kirim pesan. Keluar dari antrian
+// auto-retry (cron & manual cuma proses after_blast + in_progress) supaya tidak ter-blast
+// attempt berikutnya. Sticky sampai Done/Invalid/Reopen.
+$('#actScheduled').addEventListener('click', async () => {
+  if (!currentPhone) return;
+  $('#actScheduled').disabled = true;
+  try {
+    const fd = new FormData(); fd.append('status', 'scheduled');
+    const r = await apiFetch(`/api/inbox/status?phone=${encodeURIComponent(currentPhone)}`, { method: 'POST', body: fd });
+    if (!r.ok) { alert('Gagal: ' + await r.text()); return; }
+    toast('📅 Dijadwalkan validasi lain hari — dikecualikan dari auto-blast attempt berikutnya.');
+    await loadMessages(false);
+    loadThreads();
+  } finally {
+    $('#actScheduled').disabled = false;
   }
 });
 
