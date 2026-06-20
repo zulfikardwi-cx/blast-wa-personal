@@ -764,6 +764,34 @@ func renderClosingTemplate(namaOutlet string) string {
 	return out
 }
 
+// unwrapMessage — buka pembungkus pesan (view-once, ephemeral/disappearing, device-sent,
+// edited, document-with-caption) supaya media di dalamnya terdeteksi & bisa diunduh.
+// Tanpa ini, foto view-once / pesan disappearing jadi "[Pesan tidak didukung]". Recursive
+// dengan batas kedalaman. Getter protobuf nil-safe (aman walau wrapper-nya nil).
+func unwrapMessage(m *waProto.Message) *waProto.Message {
+	for i := 0; i < 6 && m != nil; i++ {
+		switch {
+		case m.GetEphemeralMessage().GetMessage() != nil:
+			m = m.GetEphemeralMessage().GetMessage()
+		case m.GetViewOnceMessage().GetMessage() != nil:
+			m = m.GetViewOnceMessage().GetMessage()
+		case m.GetViewOnceMessageV2().GetMessage() != nil:
+			m = m.GetViewOnceMessageV2().GetMessage()
+		case m.GetViewOnceMessageV2Extension().GetMessage() != nil:
+			m = m.GetViewOnceMessageV2Extension().GetMessage()
+		case m.GetDocumentWithCaptionMessage().GetMessage() != nil:
+			m = m.GetDocumentWithCaptionMessage().GetMessage()
+		case m.GetEditedMessage().GetMessage() != nil:
+			m = m.GetEditedMessage().GetMessage()
+		case m.GetDeviceSentMessage().GetMessage() != nil:
+			m = m.GetDeviceSentMessage().GetMessage()
+		default:
+			return m
+		}
+	}
+	return m
+}
+
 // extractTextFromMessage — ambil body text dari waProto.Message.
 // Return (text, mediaType). Kalau bukan text murni, body diisi placeholder + mediaType di-set.
 func extractTextFromMessage(m *waProto.Message) (string, string) {
@@ -786,6 +814,9 @@ func extractTextFromMessage(m *waProto.Message) (string, string) {
 	}
 	if m.GetAudioMessage() != nil {
 		return "[Pesan suara]", "audio"
+	}
+	if m.GetPtvMessage() != nil { // video note (video bulat)
+		return "[Video]", "video"
 	}
 	if m.GetDocumentMessage() != nil {
 		return "[Dokumen] " + m.GetDocumentMessage().GetFileName(), "document"

@@ -308,7 +308,14 @@ func handleIncomingWA(e *events.Message) {
 		log.Println("  → skipped: phone", phone, "tidak ada di chat_threads (belum pernah di-blast)")
 		return
 	}
-	body, mediaType := extractTextFromMessage(e.Message)
+	// Unwrap pembungkus (view-once/ephemeral/device-sent) dulu supaya media di dalamnya
+	// terdeteksi. eff dipakai utk extract DAN download (DownloadAny butuh pesan yg benar).
+	eff := unwrapMessage(e.Message)
+	body, mediaType := extractTextFromMessage(eff)
+	if mediaType == "unknown" {
+		// Diagnostik: lihat tipe asli pesan yang belum didukung (untuk ditangani nanti).
+		log.Printf("  → UNKNOWN message type from=%s id=%s, raw: %.400s", phone, e.Info.ID, eff.String())
+	}
 	if err := recordChatMessage(phone, "in", body, mediaType, e.Info.ID, e.Info.Timestamp, 0, "", ""); err != nil {
 		log.Println("warn: recordChatMessage incoming:", err)
 	}
@@ -318,7 +325,7 @@ func handleIncomingWA(e *events.Message) {
 	// Media (gambar/video/audio/stiker/dokumen) → unduh & simpan async supaya bisa
 	// ditampilkan di chatbox. Jangan blok event handler.
 	if isDownloadableMedia(mediaType) {
-		go downloadAndStoreMedia(e.Info.ID, e.Message, mediaType)
+		go downloadAndStoreMedia(e.Info.ID, eff, mediaType)
 	}
 	log.Println("  → inbox: incoming from", phone, "—", truncate(body, 40))
 }
