@@ -412,38 +412,62 @@ $('#signoutBtn').addEventListener('click', async () => {
 });
 
 let progTimer = null;
+
+function stopProgressPolling() {
+  if (progTimer) { clearInterval(progTimer); progTimer = null; }
+}
+
+async function tickProgress() {
+  let r;
+  try { r = await apiFetch('/api/progress').then(res => res.json()); }
+  catch (e) { return; }
+  if (!r.job) { stopProgressPolling(); return; }
+  const j = r.job;
+  $('#sTotal').textContent = j.total;
+  $('#sSent').textContent = j.sent;
+  $('#sFailed').textContent = j.failed;
+  $('#sPending').textContent = j.total - j.sent - j.failed - j.skipped;
+  const tb = $('#progTable tbody');
+  tb.innerHTML = '';
+  j.items.forEach((it,i) => {
+    const tr = document.createElement('tr');
+    const cls = { pending:'b-pending', sent:'b-sent', failed:'b-failed', skipped:'b-skipped' }[it.status] || 'b-pending';
+    tr.innerHTML = `
+      <td>${i+1}</td>
+      <td>${esc(it.phone)}</td>
+      <td>${esc(it.nama_outlet||'')}</td>
+      <td>${esc(it.nomer_invoice||'')}</td>
+      <td><span class="badge ${cls}">${it.status}</span></td>
+      <td class="truncate" title="${esc(it.message||it.error||'')}">${it.error ? '<span class="err">'+esc(it.error)+'</span>' : esc((it.message||'').slice(0,80))}</td>
+      <td>${it.sent_at ? new Date(it.sent_at).toLocaleTimeString() : ''}</td>`;
+    tb.appendChild(tr);
+  });
+  if (j.running) {
+    // blast masih jalan — kunci tombol mulai, sembunyikan reset (juga berlaku saat resume)
+    $('#startBtn').disabled = true;
+    $('#cancelBtn').style.display = 'none';
+  } else {
+    // selesai — berhenti polling, tampilkan hasil akhir + tombol reset
+    stopProgressPolling();
+    $('#startBtn').disabled = false;
+    $('#cancelBtn').style.display = '';
+    loadHistory();
+  }
+}
+
 function pollProgress() {
   if (progTimer) return;
-  progTimer = setInterval(async () => {
-    const r = await apiFetch('/api/progress').then(r => r.json());
-    if (!r.job) return;
-    const j = r.job;
-    $('#sTotal').textContent = j.total;
-    $('#sSent').textContent = j.sent;
-    $('#sFailed').textContent = j.failed;
-    $('#sPending').textContent = j.total - j.sent - j.failed - j.skipped;
-    const tb = $('#progTable tbody');
-    tb.innerHTML = '';
-    j.items.forEach((it,i) => {
-      const tr = document.createElement('tr');
-      const cls = { pending:'b-pending', sent:'b-sent', failed:'b-failed', skipped:'b-skipped' }[it.status] || 'b-pending';
-      tr.innerHTML = `
-        <td>${i+1}</td>
-        <td>${esc(it.phone)}</td>
-        <td>${esc(it.nama_outlet||'')}</td>
-        <td>${esc(it.nomer_invoice||'')}</td>
-        <td><span class="badge ${cls}">${it.status}</span></td>
-        <td class="truncate" title="${esc(it.message||it.error||'')}">${it.error ? '<span class="err">'+esc(it.error)+'</span>' : esc((it.message||'').slice(0,80))}</td>
-        <td>${it.sent_at ? new Date(it.sent_at).toLocaleTimeString() : ''}</td>`;
-      tb.appendChild(tr);
-    });
-    if (!j.running) {
-      clearInterval(progTimer); progTimer = null;
-      $('#startBtn').disabled = false;
-      $('#cancelBtn').style.display = '';
-      loadHistory();
-    }
-  }, 1500);
+  tickProgress();                              // render langsung (tanpa nunggu 1.5s)
+  progTimer = setInterval(tickProgress, 1500);
+}
+
+// Saat halaman dimuat/refresh: kalau ada blast yang MASIH BERJALAN di server, lanjutkan
+// tampilkan progress-nya supaya tidak hilang saat refresh. Selesai/tidak ada → biarkan kosong.
+async function resumeProgressIfRunning() {
+  try {
+    const r = await apiFetch('/api/progress').then(res => res.json());
+    if (r.job && r.job.running) pollProgress();
+  } catch (e) {}
 }
 
 $('#cancelBtn').addEventListener('click', () => {
@@ -675,6 +699,7 @@ loadMe().then(() => {
     loadTemplates();
     pollUnread();
     setInterval(pollUnread, 8000);
+    resumeProgressIfRunning();
   }
 });
 </script>
