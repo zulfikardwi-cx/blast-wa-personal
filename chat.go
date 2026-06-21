@@ -207,7 +207,7 @@ Nama Outlet: {{nama_outlet}}
 No. Invoice: {{nomer_invoice}}
 
 Apabila Kakak bersedia mengikuti proses validasi, mohon balas pesan ini pada jam operasional kami (09.00–16.00 WIB) agar proses penjadwalan dapat segera dilakukan.
-Tim Validator kami akan menghubungi Kakak untuk melakukan sesi Google Meet atau WhatsApp Call.
+Tim Validator kami akan menghubungi Kakak melalui WhatsApp Call.
 
 Terima kasih! 🙏`)
 
@@ -220,7 +220,7 @@ Nama Outlet: {{nama_outlet}}
 No. Invoice: {{nomer_invoice}}
 
 Apabila Kakak bersedia mengikuti proses validasi, mohon balas pesan ini pada jam operasional kami (09.00–16.00 WIB) agar proses penjadwalan dapat segera dilakukan.
-Tim Validator kami akan menghubungi Kakak untuk melakukan sesi Google Meet atau WhatsApp Call.
+Tim Validator kami akan menghubungi Kakak melalui WhatsApp Call.
 
 Terima kasih! 🙏`)
 
@@ -233,7 +233,7 @@ Nama Outlet: {{nama_outlet}}
 No. Invoice: {{nomer_invoice}}
 
 Apabila Kakak bersedia mengikuti proses validasi, mohon balas pesan ini pada jam operasional kami (09.00–16.00 WIB) agar proses penjadwalan dapat segera dilakukan.
-Tim Validator kami akan menghubungi Kakak untuk melakukan sesi Google Meet atau WhatsApp Call.
+Tim Validator kami akan menghubungi Kakak melalui WhatsApp Call.
 Jika Kakak masih belum membalas pesan ini, maka penjadwalan kami tutup. Jika terdapat permintaan dan informasi lainnya, silahkan menghubungi Hotline Majoo pada nomer 0811-500-460
 
 Terima kasih! 🙏`)
