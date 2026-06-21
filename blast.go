@@ -165,7 +165,10 @@ func parseCSV(r io.Reader) ([]*RecipientStatus, error) {
 	}
 	idx := map[string]int{}
 	for i, h := range header {
-		idx[strings.ToLower(strings.TrimSpace(h))] = i
+		// Buang UTF-8 BOM (U+FEFF) yang sering nempel di sel pertama saat file disimpan
+		// sebagai "CSV UTF-8" dari Excel/Sheets — tanpa ini "phone" terbaca "\ufeffphone".
+		h = strings.TrimPrefix(strings.TrimSpace(h), "\ufeff")
+		idx[strings.ToLower(h)] = i
 	}
 	pi, ok1 := idx["phone"]
 	ni, ok2 := idx["nama_outlet"]
