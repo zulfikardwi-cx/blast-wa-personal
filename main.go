@@ -312,9 +312,12 @@ func handleIncomingWA(e *events.Message) {
 	// terdeteksi. eff dipakai utk extract DAN download (DownloadAny butuh pesan yg benar).
 	eff := unwrapMessage(e.Message)
 	body, mediaType := extractTextFromMessage(eff)
-	if mediaType == "unknown" {
-		// Diagnostik: lihat tipe asli pesan yang belum didukung (untuk ditangani nanti).
-		log.Printf("  → UNKNOWN message type from=%s id=%s, raw: %.400s", phone, e.Info.ID, eff.String())
+	// Pesan kontrol/protokol WA (EPHEMERAL_SYNC_RESPONSE, revoke, reaction, dsb.) BUKAN
+	// isi chat dari customer. Jangan dicatat / dimunculkan ("[Pesan tidak didukung]") dan
+	// jangan geser thread ke Open / tambah unread. Skip total.
+	if mediaType == "unknown" || (body == "" && mediaType == "") {
+		log.Printf("  → skip: pesan kontrol/tidak didukung from=%s id=%s raw: %.200s", phone, e.Info.ID, eff.String())
+		return
 	}
 	if err := recordChatMessage(phone, "in", body, mediaType, e.Info.ID, e.Info.Timestamp, 0, "", ""); err != nil {
 		log.Println("warn: recordChatMessage incoming:", err)
