@@ -115,6 +115,8 @@
   .chat-header button.ongoing-btn:hover{background:rgba(167,139,250,.12)}
   .chat-header button.sched-btn{color:#22d3ee;border-color:rgba(34,211,238,.5)}
   .chat-header button.sched-btn:hover{background:rgba(34,211,238,.12)}
+  .chat-header button.forceclose-btn{color:#94a3b8;border-color:rgba(100,116,139,.5)}
+  .chat-header button.forceclose-btn:hover{background:rgba(100,116,139,.15)}
   .h-followup{font-size:12px;color:#22d3ee;font-weight:600;margin-top:2px}
   .thread-item .followup{color:#22d3ee;font-size:11px;font-weight:600;margin-top:4px}
   /* modal jadwal follow-up */
@@ -288,6 +290,7 @@
           <button class="reopen-btn" id="actReopen" style="display:none">↺ Reopen</button>
           <button class="ongoing-btn" id="actOnGoing">⏳ On Going</button>
           <button class="sched-btn" id="actScheduled">📅 Scheduled</button>
+          <button class="forceclose-btn" id="actForceClose">⛔ Force Close</button>
           <button class="invalid-btn" id="actInvalid">⚠ Invalid</button>
           <button class="done-btn" id="actDone">✓ Done / Resolved</button>
         </div>
@@ -512,6 +515,7 @@ async function loadMessages(scrollBottom) {
       $('#actInvalid').style.display = 'none';
       $('#actOnGoing').style.display = 'none';
       $('#actScheduled').style.display = 'none';
+      $('#actForceClose').style.display = 'none';
       $('#actReopen').style.display = '';
       replyBox.classList.add('locked');
       $('#replyText').placeholder = (r.status === 'invalid')
@@ -523,6 +527,8 @@ async function loadMessages(scrollBottom) {
       // On Going / Scheduled tampil saat aktif; saat sudah di status itu → ganti jadi Reopen
       $('#actOnGoing').style.display = ongoing ? 'none' : '';
       $('#actScheduled').style.display = scheduled ? 'none' : '';
+      // Force Close manual: tampil di status aktif, sembunyi kalau sudah force_close
+      $('#actForceClose').style.display = (r.status === 'force_close') ? 'none' : '';
       $('#actReopen').style.display = parked ? '' : 'none';
       replyBox.classList.remove('locked');
       $('#replyText').placeholder = scheduled ? 'Dijadwalkan validasi lain hari. Tulis balasan...'
@@ -646,6 +652,25 @@ $('#schedSave').addEventListener('click', async () => {
     loadThreads();
   } finally {
     $('#schedSave').disabled = false;
+  }
+});
+
+// Force Close manual — tutup paksa thread (masuk bucket Force Close). Tidak kirim pesan.
+// TIDAK mengubah logic auto force-close 17:00; cuma set status manual. Jika customer balas
+// nanti, thread otomatis kembali ke Open (perilaku force_close yang sudah ada).
+$('#actForceClose').addEventListener('click', async () => {
+  if (!currentPhone) return;
+  if (!confirm('Force Close thread ini?\n\nThread ditutup paksa & masuk bucket Force Close. Tidak ada pesan yang dikirim.\nJika customer membalas nanti, thread otomatis kembali ke Open.')) return;
+  $('#actForceClose').disabled = true;
+  try {
+    const fd = new FormData(); fd.append('status', 'force_close');
+    const r = await apiFetch(`/api/inbox/status?phone=${encodeURIComponent(currentPhone)}`, { method: 'POST', body: fd });
+    if (!r.ok) { alert('Gagal: ' + await r.text()); return; }
+    toast('⛔ Thread di-Force Close.');
+    await loadMessages(false);
+    loadThreads();
+  } finally {
+    $('#actForceClose').disabled = false;
   }
 });
 
