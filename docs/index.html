@@ -18,6 +18,9 @@
   header .logo{height:28px;width:auto;display:block}
   header .sep{width:1px;height:24px;background:var(--line)}
   header h1{font-size:14px;margin:0;font-weight:500;color:var(--muted);letter-spacing:.3px}
+  header a.nav{color:var(--muted);text-decoration:none;font-size:13px;padding:4px 10px;border-radius:6px;border:1px solid var(--line)}
+  header a.nav:hover{color:var(--teal);border-color:var(--teal)}
+  header a.nav.active{color:var(--teal);border-color:var(--teal);background:var(--teal-soft)}
   .status-pill{font-size:12px;padding:4px 10px;border-radius:999px;background:#1f2937;color:var(--muted)}
   .status-pill.ok{background:rgba(45,189,182,.2);color:var(--teal)}
   .status-pill.warn{background:#78350f;color:#fde68a}
@@ -97,8 +100,9 @@
 <header>
   <img src="assets/majoo-logo.svg" class="logo" alt="majoo" />
   <div class="sep"></div>
-  <h1>Blast WA Personal</h1>
-  <a href="inbox.html" id="navInbox" style="margin-left:8px;color:var(--muted);text-decoration:none;font-size:13px;padding:4px 10px;border-radius:6px;border:1px solid var(--line)">📥 Inbox <span id="navUnread" style="background:var(--lime);color:#0b1220;padding:1px 6px;border-radius:8px;margin-left:4px;font-size:10px;display:none"></span></a>
+  <a href="index.html" class="nav active">Blast</a>
+  <a href="inbox.html" class="nav" id="navInbox">Inbox <span id="navUnread" style="background:var(--lime);color:#0b1220;padding:1px 6px;border-radius:8px;margin-left:4px;font-size:10px;display:none"></span></a>
+  <a href="upsell.html" class="nav">Upsell</a>
   <span id="connStatus" class="status-pill">checking...</span>
   <span style="flex:1"></span>
   <div class="user" id="userBox" style="visibility:hidden">

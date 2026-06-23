@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Upsell — Blast WA Personal</title>
+<script src="config.js"></script>
+<style>
+  :root {
+    --bg:#0b1220; --panel:#121a2b; --panel2:#0f1626; --line:#223;
+    --text:#e6ecff; --muted:#8b97b8;
+    --teal:#2DBDB6; --lime:#9ACF87; --teal-soft:rgba(45,189,182,.15);
+    --accent2:#3b82f6; --warn:#f59e0b; --danger:#ef4444;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-height:100vh}
+  header{padding:14px 24px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:16px;background:var(--panel)}
+  header .logo{height:28px;width:auto;display:block}
+  header .sep{width:1px;height:24px;background:var(--line)}
+  header a.nav{color:var(--muted);text-decoration:none;font-size:13px;padding:4px 10px;border-radius:6px;border:1px solid var(--line)}
+  header a.nav:hover{color:var(--teal);border-color:var(--teal)}
+  header a.nav.active{color:var(--teal);border-color:var(--teal);background:var(--teal-soft)}
+  .status-pill{font-size:12px;padding:4px 10px;border-radius:999px;background:#1f2937;color:var(--muted)}
+  .status-pill.ok{background:rgba(45,189,182,.2);color:var(--teal)}
+  .user{display:flex;align-items:center;gap:8px}
+  .user img{width:28px;height:28px;border-radius:50%;background:var(--line)}
+  .user .uname b{font-size:12px;display:block}
+  .user .uname small{font-size:11px;color:var(--muted)}
+  button.ghost{background:transparent;color:var(--text);border:1px solid var(--line);padding:8px 14px;border-radius:6px;font-weight:600;cursor:pointer}
+  button.ghost:hover{border-color:var(--teal);color:var(--teal)}
+  main{max-width:1100px;margin:0 auto;padding:40px 24px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:40px;text-align:center}
+  .card .ic{font-size:40px;margin-bottom:8px}
+  .card h2{margin:0 0 6px;font-size:20px}
+  .card p{margin:0;color:var(--muted);font-size:13px;line-height:1.6}
+  .badge-soon{display:inline-block;margin-top:14px;font-size:11px;font-weight:600;color:var(--warn);background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.4);padding:4px 10px;border-radius:999px;text-transform:uppercase;letter-spacing:.5px}
+</style>
+</head>
+<body>
+<header>
+  <img src="assets/majoo-logo.svg" class="logo" alt="majoo" />
+  <div class="sep"></div>
+  <a href="index.html" class="nav">Blast</a>
+  <a href="inbox.html" class="nav" id="navInbox">Inbox <span id="navUnread" style="background:var(--lime);color:#0b1220;padding:1px 6px;border-radius:8px;margin-left:4px;font-size:10px;display:none"></span></a>
+  <a href="upsell.html" class="nav active">Upsell</a>
+  <span id="connStatus" class="status-pill">checking...</span>
+  <span style="flex:1"></span>
+  <div class="user" id="userBox" style="visibility:hidden">
+    <img id="userAvatar" src="" alt="" />
+    <div class="uname"><b id="userName">—</b><small id="userEmail">—</small></div>
+  </div>
+  <button id="signoutBtn" class="ghost">Sign out</button>
+</header>
+
+<main>
+  <div class="card">
+    <div class="ic">🛍️</div>
+    <h2>Upsell</h2>
+    <p>Halaman ini sedang disiapkan. Fitur & logic Upsell akan ditambahkan menyusul.</p>
+    <span class="badge-soon">Segera hadir</span>
+  </div>
+</main>
+
+<script>
+const API_BASE = (window.APP_CONFIG && window.APP_CONFIG.API_BASE) || '';
+const $ = s => document.querySelector(s);
+function apiFetch(path, opts = {}) { return fetch(API_BASE + path, { credentials: 'include', ...opts }); }
+
+let me = null;
+async function loadMe() {
+  try {
+    const r = await apiFetch('/api/me').then(r => r.json());
+    me = r.user || null;
+  } catch (e) { me = null; }
+  if (!me) { location.href = 'login.html'; return; }
+  $('#userName').textContent = me.name || me.email;
+  $('#userEmail').textContent = me.email;
+  if (me.picture) { $('#userAvatar').src = me.picture; } else { $('#userAvatar').style.display = 'none'; }
+  $('#userBox').style.visibility = 'visible';
+}
+
+async function pollStatus() {
+  try {
+    const s = await apiFetch('/api/status').then(r => r.json());
+    const pill = $('#connStatus');
+    if (s.connected) { pill.textContent = 'WA Connected'; pill.className = 'status-pill ok'; }
+    else { pill.textContent = s.loggedIn ? 'WA Reconnecting…' : 'WA Belum Login'; pill.className = 'status-pill'; }
+  } catch (e) {}
+}
+
+async function pollUnread() {
+  try {
+    const r = await apiFetch('/api/inbox/threads?status=open').then(r => r.json());
+    const unread = (r.counts && r.counts.unread) || 0;
+    const badge = $('#navUnread');
+    if (unread > 0) { badge.style.display = 'inline-block'; badge.textContent = unread; }
+    else { badge.style.display = 'none'; }
+  } catch (e) {}
+}
+
+$('#signoutBtn').addEventListener('click', async () => {
+  await apiFetch('/auth/logout', { method: 'POST' });
+  location.href = 'login.html';
+});
+
+loadMe().then(() => {
+  if (me) {
+    pollStatus(); setInterval(pollStatus, 2500);
+    pollUnread(); setInterval(pollUnread, 8000);
+  }
+});
+</script>
+</body>
+</html>
