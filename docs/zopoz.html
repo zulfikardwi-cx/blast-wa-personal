@@ -386,26 +386,54 @@ async function loadMe() {
   } catch (e) { showApiErr('Tidak bisa konek ke backend'); }
 }
 
+// State statis saat backend Zopoz belum aktif (route /api/zopoz/* belum di-deploy).
+let zopozOffline = false;
+function showZopozOffline() {
+  zopozOffline = true;
+  const pill = $('#connStatus');
+  pill.textContent = 'Zopoz belum aktif'; pill.className = 'status-pill warn';
+  const badge = $('#waStatusBadge');
+  badge.textContent = 'Belum aktif'; badge.style.background = '#78350f'; badge.style.color = '#fde68a';
+}
+
 async function pollStatus() {
+  let r;
   try {
-    const r = await apiFetch('/api/zopoz/wa-status');
-    if (r.status === 401) { location.href = 'login.html'; return; }
-    const d = await r.json();
-    const pill = $('#connStatus');
-    const badge = $('#waStatusBadge');
-    if (d.loggedIn && d.connected) {
-      pill.textContent = 'WA Connected'; pill.className = 'status-pill ok';
-      badge.textContent = 'WA Connected'; badge.style.background = 'rgba(154,207,135,.15)'; badge.style.color = 'var(--lime)';
-    } else {
-      pill.textContent = d.hasQR ? 'Scan QR' : 'Disconnected'; pill.className = 'status-pill warn';
-      badge.textContent = 'WA Disconnected'; badge.style.background = '#78350f'; badge.style.color = '#fde68a';
-    }
-  } catch (e) {}
+    r = await apiFetch('/api/zopoz/wa-status');
+  } catch (e) { showZopozOffline(); return; }
+  if (r.status === 401) { location.href = 'login.html'; return; }
+  if (!r.ok) { showZopozOffline(); return; }
+  let d;
+  try { d = await r.json(); } catch (e) { showZopozOffline(); return; }
+  zopozOffline = false;
+  const pill = $('#connStatus');
+  const badge = $('#waStatusBadge');
+  if (d.loggedIn && d.connected) {
+    pill.textContent = 'WA Connected'; pill.className = 'status-pill ok';
+    badge.textContent = 'WA Connected'; badge.style.background = 'rgba(154,207,135,.15)'; badge.style.color = 'var(--lime)';
+  } else {
+    pill.textContent = d.hasQR ? 'Scan QR' : 'Disconnected'; pill.className = 'status-pill warn';
+    badge.textContent = 'WA Disconnected'; badge.style.background = '#78350f'; badge.style.color = '#fde68a';
+  }
+}
+
+function renderThreadsOffline() {
+  ['cAfterBlast','cOpen','cProg','cOnGoing','cScheduled','cDone','cInvalid','cForceClose'].forEach(id => $('#'+id).textContent = '0');
+  allThreads = [];
+  $('#listTitle').textContent = bucketLabels[currentBucket] || 'All';
+  $('#listCount').textContent = '0';
+  $('#threadList').innerHTML = '<div class="empty">Inbox Zopoz belum aktif.<br/><small>Backend Zopoz belum di-deploy. Thread akan muncul otomatis setelah backend di-restart &amp; nomor Zopoz dipasang.</small></div>';
 }
 
 async function loadThreads() {
+  let r;
   try {
-    const r = await apiFetch(`/api/zopoz/threads?status=${currentBucket}`).then(r => r.json());
+    const res = await apiFetch(`/api/zopoz/threads?status=${currentBucket}`);
+    if (res.status === 401) { location.href = 'login.html'; return; }
+    if (!res.ok) throw new Error('offline');
+    r = await res.json();
+  } catch (e) { renderThreadsOffline(); return; }
+  try {
     $('#cAfterBlast').textContent = r.counts.after_blast || 0;
     $('#cOpen').textContent = r.counts.open || 0;
     $('#cProg').textContent = r.counts.in_progress || 0;

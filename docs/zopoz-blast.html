@@ -228,31 +228,45 @@ async function loadMe() {
   }
 }
 
+// Saat backend Zopoz belum aktif (endpoint /api/zopoz/* belum di-deploy), tampilkan
+// state STATIS yang rapi — bukan "API error" / loader yang nyangkut.
+let zopozOffline = false;
+function showZopozOffline() {
+  zopozOffline = true;
+  const pill = $('#connStatus');
+  pill.textContent = 'Zopoz belum aktif'; pill.className = 'status-pill warn';
+  $('#qrBox').style.display = 'none';
+  $('#logoutBtn').style.display = 'none';
+  $('#connInfo').innerHTML = 'Tampilan statis. Backend Zopoz belum di-deploy — pairing QR &amp; blast akan aktif otomatis setelah backend di-restart.';
+}
+
 async function pollStatus() {
+  let r;
   try {
-    const r = await apiFetch('/api/zopoz/wa-status');
-    if (r.status === 401) { location.href = 'login.html'; return; }
-    const d = await r.json();
-    const pill = $('#connStatus');
-    if (d.loggedIn && d.connected) {
-      pill.textContent = 'Zopoz Connected'; pill.className = 'status-pill ok';
-      $('#qrBox').style.display = 'none';
-      $('#connInfo').textContent = 'WhatsApp Zopoz terhubung. Siap blast.';
-      $('#logoutBtn').style.display = '';
-      updateStartBtn();
-    } else if (d.hasQR) {
-      const q = await apiFetch('/api/zopoz/qr').then(r => r.json());
-      pill.textContent = 'Scan QR Zopoz'; pill.className = 'status-pill warn';
-      $('#qrBox').style.display = 'block';
-      $('#qrImg').src = 'https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=' + encodeURIComponent(q.code);
-      $('#connInfo').textContent = '';
-      $('#logoutBtn').style.display = 'none';
-    } else {
-      pill.textContent = 'Disconnected'; pill.className = 'status-pill';
-      $('#connInfo').textContent = 'Menghubungkan...';
-    }
-  } catch (e) {
-    $('#connStatus').textContent = 'API error'; $('#connStatus').className = 'status-pill err';
+    r = await apiFetch('/api/zopoz/wa-status');
+  } catch (e) { showZopozOffline(); return; }
+  if (r.status === 401) { location.href = 'login.html'; return; }
+  if (!r.ok) { showZopozOffline(); return; }   // 404 → backend belum punya route Zopoz
+  let d;
+  try { d = await r.json(); } catch (e) { showZopozOffline(); return; }
+  zopozOffline = false;
+  const pill = $('#connStatus');
+  if (d.loggedIn && d.connected) {
+    pill.textContent = 'Zopoz Connected'; pill.className = 'status-pill ok';
+    $('#qrBox').style.display = 'none';
+    $('#connInfo').textContent = 'WhatsApp Zopoz terhubung. Siap blast.';
+    $('#logoutBtn').style.display = '';
+    updateStartBtn();
+  } else if (d.hasQR) {
+    const q = await apiFetch('/api/zopoz/qr').then(r => r.json());
+    pill.textContent = 'Scan QR Zopoz'; pill.className = 'status-pill warn';
+    $('#qrBox').style.display = 'block';
+    $('#qrImg').src = 'https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=' + encodeURIComponent(q.code);
+    $('#connInfo').textContent = '';
+    $('#logoutBtn').style.display = 'none';
+  } else {
+    pill.textContent = 'Disconnected'; pill.className = 'status-pill';
+    $('#connInfo').textContent = 'Menghubungkan...';
   }
 }
 
@@ -277,16 +291,26 @@ $('#csv').addEventListener('change', async (e) => {
 });
 
 let templates = { attempt_1: '', attempt_2: '', attempt_3: '' };
+const TPL_PLACEHOLDER = '(Template Attempt akan tampil di sini setelah backend Zopoz aktif. Template sama dengan Blast utama — variabel {{nama_outlet}} & {{nomer_invoice}} di-replace otomatis saat kirim.)';
 async function loadTemplates() {
+  let r;
   try {
-    const r = await apiFetch('/api/zopoz/templates').then(r => r.json());
-    templates = r;
-    $('#tplPreview1').textContent = r.attempt_1 || '';
-    $('#tplPreview2').textContent = r.attempt_2 || '';
-    $('#tplPreview3').textContent = r.attempt_3 || '';
-    if (r.retry_window_hour != null) $('#retryHours').textContent = String(r.retry_window_hour).padStart(2, '0');
-    renderPreview();
-  } catch (e) {}
+    const res = await apiFetch('/api/zopoz/templates');
+    if (!res.ok) throw new Error('offline');
+    r = await res.json();
+  } catch (e) {
+    // backend belum aktif → tampilkan placeholder statis, jangan biarkan "Memuat..."
+    $('#tplPreview1').textContent = TPL_PLACEHOLDER;
+    $('#tplPreview2').textContent = TPL_PLACEHOLDER;
+    $('#tplPreview3').textContent = TPL_PLACEHOLDER;
+    return;
+  }
+  templates = r;
+  $('#tplPreview1').textContent = r.attempt_1 || '';
+  $('#tplPreview2').textContent = r.attempt_2 || '';
+  $('#tplPreview3').textContent = r.attempt_3 || '';
+  if (r.retry_window_hour != null) $('#retryHours').textContent = String(r.retry_window_hour).padStart(2, '0');
+  renderPreview();
 }
 
 $$('.tpl').forEach(b => b.addEventListener('click', () => {
@@ -418,8 +442,16 @@ function attemptBadge(a) {
 }
 
 async function loadHistory() {
+  let r;
   try {
-    const r = await apiFetch('/api/zopoz/history').then(r => r.json());
+    const res = await apiFetch('/api/zopoz/history');
+    if (!res.ok) throw new Error('offline');
+    r = await res.json();
+  } catch (e) {
+    $('#historyTable tbody').innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:20px">Riwayat Blast Zopoz tampil setelah backend aktif.</td></tr>';
+    return;
+  }
+  try {
     const tb = $('#historyTable tbody');
     tb.innerHTML = '';
     (r.logs || []).forEach(l => {
