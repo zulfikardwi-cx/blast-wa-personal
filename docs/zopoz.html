@@ -3,40 +3,175 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Zopoz — Blast WA Personal</title>
+<title>Zopoz Inbox — Blast WA Personal</title>
 <script src="config.js"></script>
 <style>
   :root {
     --bg:#0b1220; --panel:#121a2b; --panel2:#0f1626; --line:#223;
     --text:#e6ecff; --muted:#8b97b8;
     --teal:#2DBDB6; --lime:#9ACF87; --teal-soft:rgba(45,189,182,.15);
-    --accent2:#3b82f6; --warn:#f59e0b; --danger:#ef4444;
+    --warn:#f59e0b; --danger:#ef4444; --blue:#3b82f6;
+    --bubble-in:#1f2937; --bubble-out:rgba(45,189,182,.2);
   }
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-height:100vh}
-  header{padding:14px 24px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:16px;background:var(--panel)}
-  header .logo{height:28px;width:auto;display:block}
-  header .sep{width:1px;height:24px;background:var(--line)}
+  html,body{height:100%;margin:0}
+  body{background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:flex;flex-direction:column;overflow:hidden}
+
+  header{padding:12px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;background:var(--panel);flex-shrink:0}
+  header .logo{height:24px;width:auto}
+  header .sep{width:1px;height:20px;background:var(--line)}
+  header h1{font-size:14px;margin:0;font-weight:500;color:var(--muted)}
   header a.nav{color:var(--muted);text-decoration:none;font-size:13px;padding:4px 10px;border-radius:6px;border:1px solid var(--line)}
   header a.nav:hover{color:var(--teal);border-color:var(--teal)}
   header a.nav.active{color:var(--teal);border-color:var(--teal);background:var(--teal-soft)}
-  .status-pill{font-size:12px;padding:4px 10px;border-radius:999px;background:#1f2937;color:var(--muted)}
+  .user{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+  .user img{width:24px;height:24px;border-radius:50%;border:1px solid var(--line)}
+  .status-pill{font-size:11px;padding:3px 9px;border-radius:999px;background:#1f2937;color:var(--muted)}
   .status-pill.ok{background:rgba(45,189,182,.2);color:var(--teal)}
-  .user{display:flex;align-items:center;gap:8px}
-  .user img{width:28px;height:28px;border-radius:50%;background:var(--line)}
-  .user .uname b{font-size:12px;display:block}
-  .user .uname small{font-size:11px;color:var(--muted)}
-  button.ghost{background:transparent;color:var(--text);border:1px solid var(--line);padding:8px 14px;border-radius:6px;font-weight:600;cursor:pointer}
-  button.ghost:hover{border-color:var(--teal);color:var(--teal)}
-  main{max-width:1100px;margin:0 auto;padding:40px 24px}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:40px;text-align:center}
-  .card .ic{font-size:40px;margin-bottom:8px}
-  .card h2{margin:0 0 6px;font-size:20px}
-  .card p{margin:0;color:var(--muted);font-size:13px;line-height:1.6}
-  .badge-soon{display:inline-block;margin-top:14px;font-size:11px;font-weight:600;color:var(--warn);background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.4);padding:4px 10px;border-radius:999px;text-transform:uppercase;letter-spacing:.5px}
+  .status-pill.warn{background:#78350f;color:#fde68a}
+
+  main{flex:1;display:flex;overflow:hidden}
+
+  /* ===== COL 1 — BUCKET NAV ===== */
+  .col-bucket{width:230px;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;flex-shrink:0;padding:16px 12px}
+  .col-bucket .acc-card{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:16px}
+  .col-bucket .acc-card .title{font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px}
+  .col-bucket .acc-card .icon-circle{width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,var(--teal),var(--lime));display:flex;align-items:center;justify-content:center;color:#0b1220;font-weight:700;font-size:14px}
+  .col-bucket .acc-card .sub{font-size:11px;color:var(--muted);margin-top:2px}
+  .col-bucket .acc-card .status{font-size:11px;margin-top:8px;padding:4px 8px;background:rgba(154,207,135,.15);color:var(--lime);border-radius:6px;display:inline-flex;align-items:center;gap:4px}
+  .col-bucket .acc-card .status::before{content:"●"}
+
+  .col-bucket .label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin:8px 0 6px;padding-left:8px}
+  .bucket-btn{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;cursor:pointer;border:0;background:transparent;color:var(--text);font-size:13px;text-align:left;width:100%;margin-bottom:2px;transition:background .12s}
+  .bucket-btn:hover{background:var(--panel2)}
+  .bucket-btn.active{background:var(--panel2);border:1px solid var(--line)}
+  .bucket-btn .dot{width:8px;height:8px;border-radius:50%}
+  .bucket-btn .name{flex:1;font-weight:500}
+  .bucket-btn .count{font-size:11px;background:var(--line);color:var(--muted);padding:2px 8px;border-radius:10px;min-width:24px;text-align:center}
+  .bucket-btn.active .count{background:var(--teal);color:#0b1220;font-weight:600}
+  .dot.after_blast{background:var(--blue)}
+  .dot.open{background:var(--lime)}
+  .dot.in_progress{background:var(--warn)}
+  .dot.done{background:var(--muted)}
+  .dot.invalid{background:var(--danger)}
+  .dot.on_going{background:#a78bfa}
+  .dot.scheduled{background:#22d3ee}
+  .dot.force_close{background:#64748b}
+
+  .user-card{margin-top:auto;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px;font-size:11px;color:var(--muted)}
+  .user-card b{color:var(--text);display:block;font-size:12px;font-weight:600}
+  .user-card a.signout{color:var(--teal);font-size:11px;text-decoration:none;float:right}
+
+  /* ===== COL 2 — THREAD LIST ===== */
+  .col-list{width:360px;background:var(--panel2);border-right:1px solid var(--line);display:flex;flex-direction:column;flex-shrink:0}
+  .list-header{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px}
+  .list-header h2{margin:0;font-size:15px;font-weight:600}
+  .list-header .badge{background:var(--line);color:var(--muted);padding:1px 8px;border-radius:10px;font-size:11px;font-weight:500}
+  .list-header .badge.hl{background:var(--teal);color:#0b1220}
+  .list-header .sort{margin-left:auto;font-size:11px;color:var(--muted)}
+
+  .search-box{padding:10px 14px;border-bottom:1px solid var(--line)}
+  .search-box input{width:100%;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 12px;font-size:12px}
+  .search-box input:focus{outline:none;border-color:var(--teal)}
+
+  .thread-list{flex:1;overflow-y:auto}
+  .thread-item{padding:14px 18px;border-bottom:1px solid var(--line);cursor:pointer;display:flex;gap:12px;position:relative;transition:background .12s}
+  .thread-item:hover{background:var(--panel)}
+  .thread-item.selected{background:var(--panel);box-shadow:inset 3px 0 0 var(--teal)}
+  .thread-item .avatar{width:36px;height:36px;border-radius:50%;background:var(--line);display:flex;align-items:center;justify-content:center;color:var(--text);font-weight:600;font-size:13px;flex-shrink:0}
+  .thread-item .body{flex:1;min-width:0}
+  .thread-item .top{display:flex;align-items:center;gap:8px;margin-bottom:2px}
+  .thread-item .name{font-weight:600;font-size:13px;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .thread-item .time{font-size:10px;color:var(--muted);flex-shrink:0}
+  .thread-item .phone{color:var(--muted);font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;margin-bottom:4px}
+  .thread-item .preview{color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .thread-item .status-tag{display:inline-block;font-size:9px;padding:1px 7px;border-radius:8px;text-transform:uppercase;letter-spacing:.4px;margin-top:6px;font-weight:600}
+  .status-tag.after_blast{background:rgba(59,130,246,.2);color:var(--blue)}
+  .status-tag.open{background:rgba(154,207,135,.2);color:var(--lime)}
+  .status-tag.in_progress{background:rgba(245,158,11,.2);color:var(--warn)}
+  .status-tag.done{background:rgba(139,151,184,.2);color:var(--muted)}
+  .status-tag.invalid{background:rgba(239,68,68,.2);color:var(--danger)}
+  .status-tag.on_going{background:rgba(167,139,250,.2);color:#a78bfa}
+  .status-tag.force_close{background:rgba(100,116,139,.2);color:#94a3b8}
+  .thread-item .team-tag{display:inline-block;font-size:9px;padding:1px 7px;border-radius:8px;margin-top:6px;margin-left:6px;font-weight:600;background:rgba(45,189,182,.18);color:var(--teal);text-transform:uppercase;letter-spacing:.3px}
+  .thread-item .unread{background:var(--lime);color:#0b1220;font-size:10px;font-weight:600;padding:1px 6px;border-radius:8px;position:absolute;top:14px;right:18px}
+  .empty{padding:60px 20px;text-align:center;color:var(--muted);font-size:13px}
+
+  /* ===== COL 3 — CHAT DETAIL ===== */
+  .col-chat{flex:1;display:flex;flex-direction:column;background:var(--bg);overflow:hidden;min-width:0}
+  .chat-header{padding:14px 24px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;background:var(--panel);flex-shrink:0}
+  .chat-header .avatar{width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,var(--teal),var(--lime));display:flex;align-items:center;justify-content:center;color:#0b1220;font-weight:600}
+  .chat-header .info{flex:1;min-width:0}
+  .chat-header .h-name{font-weight:600;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .chat-header .h-phone{color:var(--muted);font-size:12px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .chat-header .h-assign{color:var(--warn);font-size:11px;margin-top:2px}
+  .chat-header .actions{display:flex;gap:8px;flex-shrink:0}
+  .chat-header button{font-size:12px;padding:8px 14px;border-radius:8px;cursor:pointer;border:1px solid var(--line);background:transparent;color:var(--text);font-weight:500;transition:all .12s}
+  .chat-header button.done-btn{background:var(--lime);color:#0b1220;border-color:var(--lime);font-weight:600}
+  .chat-header button.done-btn:hover{filter:brightness(1.1)}
+  .chat-header button.invalid-btn{color:var(--danger);border-color:rgba(239,68,68,.5)}
+  .chat-header button.invalid-btn:hover{background:rgba(239,68,68,.12)}
+  .chat-header button.ongoing-btn{color:#a78bfa;border-color:rgba(167,139,250,.5)}
+  .chat-header button.ongoing-btn:hover{background:rgba(167,139,250,.12)}
+  .chat-header button.sched-btn{color:#22d3ee;border-color:rgba(34,211,238,.5)}
+  .chat-header button.sched-btn:hover{background:rgba(34,211,238,.12)}
+  .chat-header button.forceclose-btn{color:#94a3b8;border-color:rgba(100,116,139,.5)}
+  .chat-header button.forceclose-btn:hover{background:rgba(100,116,139,.15)}
+  .h-followup{font-size:12px;color:#22d3ee;font-weight:600;margin-top:2px}
+  .thread-item .followup{color:#22d3ee;font-size:11px;font-weight:600;margin-top:4px}
+  /* modal jadwal follow-up */
+  .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:200}
+  .modal{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px;width:340px;max-width:90vw}
+  .modal h3{margin:0 0 6px;font-size:15px}
+  .modal p{margin:0 0 14px;font-size:12px;color:var(--muted);line-height:1.5}
+  .modal input[type=date]{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:10px;font:13px inherit;color-scheme:dark}
+  .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+  .modal-actions button{padding:9px 16px;border-radius:8px;border:0;cursor:pointer;font-weight:600;font-size:13px}
+  .modal-actions .save{background:#22d3ee;color:#06222a}
+  .modal-actions .cancel{background:transparent;color:var(--text);border:1px solid var(--line)}
+  .chat-header button.reopen-btn{border-color:var(--blue);color:var(--blue)}
+  .chat-header button.reopen-btn:hover{background:var(--blue);color:#fff}
+  .chat-header button:hover:not(.done-btn):not(.reopen-btn){background:var(--panel2)}
+
+  .messages{flex:1;overflow-y:auto;padding:24px;display:flex;flex-direction:column;gap:6px;background-image:radial-gradient(circle at 1px 1px,rgba(255,255,255,.02) 1px,transparent 0);background-size:20px 20px}
+  .day-sep{text-align:center;color:var(--muted);font-size:11px;margin:16px 0 8px;text-transform:uppercase;letter-spacing:1px}
+  .msg{max-width:55%;padding:8px 12px;border-radius:10px;word-wrap:break-word;line-height:1.4;font-size:13px;white-space:pre-wrap}
+  .msg .meta{font-size:10px;color:var(--muted);margin-top:4px;display:flex;gap:6px}
+  .msg.in{background:var(--bubble-in);align-self:flex-start;border-bottom-left-radius:2px}
+  .msg.out{background:var(--bubble-out);align-self:flex-end;border-bottom-right-radius:2px}
+  .msg.system{background:transparent;align-self:center;color:var(--muted);font-size:11px;font-style:italic;max-width:80%;text-align:center;padding:4px 12px;border:1px dashed var(--line);border-radius:6px;margin:8px 0}
+  .msg .media{color:var(--warn);font-style:italic}
+  .msg-media{max-width:240px;max-height:300px;border-radius:8px;display:block;cursor:pointer}
+  video.msg-media{cursor:default}
+  .msg-audio{display:block;max-width:240px}
+  .msg-doc{display:inline-flex;align-items:center;gap:6px;color:var(--teal);text-decoration:none;font-weight:500}
+  .msg-doc:hover{text-decoration:underline}
+
+  .reply-box{padding:14px 20px;border-top:1px solid var(--line);background:var(--panel);flex-shrink:0;display:flex;gap:10px;align-items:flex-end}
+  .reply-box textarea{flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:10px;padding:10px 14px;font:13px/1.4 inherit;resize:none;min-height:40px;max-height:120px}
+  .reply-box textarea:focus{outline:none;border-color:var(--teal)}
+  .reply-box button{background:var(--teal);color:#0b1220;border:0;padding:10px 22px;border-radius:10px;cursor:pointer;font-weight:600;height:40px}
+  .reply-box button:disabled{opacity:.5;cursor:not-allowed}
+  .reply-box.locked{opacity:.5;pointer-events:none}
+  .reply-box.locked textarea{cursor:not-allowed}
+  /* macro quick-reply */
+  .macro-wrap{position:relative;flex-shrink:0}
+  .reply-box .macro-btn{background:var(--panel2);border:1px solid var(--line);color:var(--teal);padding:0;width:42px;height:40px;border-radius:10px;font-size:17px;font-weight:400}
+  .reply-box .macro-btn:hover{background:var(--line)}
+  .macro-menu{position:absolute;bottom:50px;left:0;width:360px;max-height:340px;overflow-y:auto;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 34px rgba(0,0,0,.55);z-index:120;padding:6px}
+  .macro-item{padding:9px 11px;border-radius:7px;cursor:pointer}
+  .macro-item:hover{background:var(--panel2)}
+  .macro-item .mt{font-weight:600;color:var(--teal);font-size:12px;display:block;margin-bottom:2px}
+  .macro-item .mp{color:var(--muted);font-size:11px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+  .no-thread{flex:1;display:flex;align-items:center;justify-content:center;color:var(--muted);text-align:center;padding:40px;flex-direction:column;gap:8px}
+  .no-thread .icon{font-size:64px;opacity:.4}
+  .global-err{background:#7f1d1d;color:#fecaca;padding:8px 20px;font-size:12px;text-align:center}
+  .toast{position:fixed;bottom:20px;right:20px;background:var(--panel);border:1px solid var(--lime);color:var(--lime);padding:10px 16px;border-radius:8px;font-size:13px;display:none;z-index:100}
 </style>
 </head>
 <body>
+<div id="apiErrBanner" class="global-err" style="display:none"></div>
 <header>
   <img src="assets/majoo-logo.svg" class="logo" alt="majoo" />
   <div class="sep"></div>
@@ -44,71 +179,630 @@
   <a href="inbox.html" class="nav" id="navInbox">Inbox <span id="navUnread" style="background:var(--lime);color:#0b1220;padding:1px 6px;border-radius:8px;margin-left:4px;font-size:10px;display:none"></span></a>
   <a href="upsell.html" class="nav">Upsell</a>
   <a href="zopoz.html" class="nav active">Zopoz</a>
-  <span id="connStatus" class="status-pill">checking...</span>
   <span style="flex:1"></span>
+  <span id="connStatus" class="status-pill">checking...</span>
   <div class="user" id="userBox" style="visibility:hidden">
     <img id="userAvatar" src="" alt="" />
-    <div class="uname"><b id="userName">—</b><small id="userEmail">—</small></div>
+    <span id="userName">—</span>
   </div>
-  <button id="signoutBtn" class="ghost">Sign out</button>
 </header>
 
 <main>
-  <div class="card">
-    <div class="ic">🤝</div>
-    <h2>Zopoz</h2>
-    <p>Halaman ini sedang disiapkan. Fitur & logic Zopoz akan ditambahkan menyusul, dengan nomor WhatsApp yang ditautkan terpisah dari Inbox/Upsell.</p>
-    <span class="badge-soon">Segera hadir</span>
+  <!-- COL 1 — BUCKETS -->
+  <div class="col-bucket">
+    <div class="acc-card">
+      <div class="title">
+        <div class="icon-circle">🤝</div>
+        <div>
+          Zopoz<br/>
+          <span class="sub">WA Zopoz (nomor terpisah)</span>
+        </div>
+      </div>
+      <div class="status" id="waStatusBadge">WA Connected</div>
+      <a href="zopoz-blast.html" style="display:block;margin-top:8px;font-size:11px;color:var(--teal);text-decoration:none">⚙ Koneksi &amp; Blast Zopoz →</a>
+    </div>
+
+    <div class="label">Bucket</div>
+    <button class="bucket-btn active" data-bucket="after_blast">
+      <span class="dot after_blast"></span>
+      <span class="name">After Blast</span>
+      <span class="count" id="cAfterBlast">0</span>
+    </button>
+    <button class="bucket-btn" data-bucket="open">
+      <span class="dot open"></span>
+      <span class="name">Open</span>
+      <span class="count" id="cOpen">0</span>
+    </button>
+    <button class="bucket-btn" data-bucket="in_progress">
+      <span class="dot in_progress"></span>
+      <span class="name">In Progress</span>
+      <span class="count" id="cProg">0</span>
+    </button>
+    <button class="bucket-btn" data-bucket="on_going">
+      <span class="dot on_going"></span>
+      <span class="name">On Going</span>
+      <span class="count" id="cOnGoing">0</span>
+    </button>
+    <button class="bucket-btn" data-bucket="scheduled">
+      <span class="dot scheduled"></span>
+      <span class="name">Scheduled</span>
+      <span class="count" id="cScheduled">0</span>
+    </button>
+    <button class="bucket-btn" data-bucket="done">
+      <span class="dot done"></span>
+      <span class="name">Done</span>
+      <span class="count" id="cDone">0</span>
+    </button>
+    <button class="bucket-btn" data-bucket="invalid">
+      <span class="dot invalid"></span>
+      <span class="name">Invalid</span>
+      <span class="count" id="cInvalid">0</span>
+    </button>
+    <button class="bucket-btn" data-bucket="force_close">
+      <span class="dot force_close"></span>
+      <span class="name">Force Close</span>
+      <span class="count" id="cForceClose">0</span>
+    </button>
+
+    <div class="user-card">
+      <div><b id="userCardName">—</b></div>
+      <span id="userCardEmail">—</span>
+      <a href="#" class="signout" id="signoutBtn">Keluar</a>
+    </div>
+  </div>
+
+  <!-- COL 2 — THREAD LIST -->
+  <div class="col-list">
+    <div class="list-header">
+      <h2 id="listTitle">After Blast</h2>
+      <span class="badge hl" id="listCount">0</span>
+      <span class="sort">↓ Terbaru</span>
+    </div>
+    <div class="search-box">
+      <input type="text" id="searchInput" placeholder="Cari outlet, nomor, invoice, atau isi chat..." />
+    </div>
+    <div style="display:flex;gap:8px;padding:0 12px 8px;align-items:center">
+      <select id="teamFilter" style="flex:1;font-size:12px;padding:6px;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:6px">
+        <option value="">Semua Team</option>
+      </select>
+    </div>
+    <div class="thread-list" id="threadList">
+      <div class="empty">Memuat...</div>
+    </div>
+  </div>
+
+  <!-- COL 3 — CHAT DETAIL -->
+  <div class="col-chat">
+    <div id="chatEmpty" class="no-thread">
+      <div class="icon">💬</div>
+      <div>Pilih thread di kiri untuk lihat percakapan</div>
+      <div style="font-size:11px">Hanya nomor yang sudah di-blast yang muncul.<br />Reply akan masuk otomatis ke sini.</div>
+    </div>
+
+    <div id="chatContent" style="display:none;flex-direction:column;flex:1;overflow:hidden">
+      <div class="chat-header">
+        <div class="avatar" id="hAvatar">--</div>
+        <div class="info">
+          <div class="h-name" id="hName">—</div>
+          <div class="h-phone" id="hPhone">—</div>
+          <div class="h-assign" id="hAssign" style="display:none"></div>
+          <div class="h-followup" id="hFollowup" style="display:none"></div>
+        </div>
+        <div class="actions">
+          <button class="reopen-btn" id="actReopen" style="display:none">↺ Reopen</button>
+          <button class="ongoing-btn" id="actOnGoing">⏳ On Going</button>
+          <button class="sched-btn" id="actScheduled">📅 Scheduled</button>
+          <button class="forceclose-btn" id="actForceClose">⛔ Force Close</button>
+          <button class="invalid-btn" id="actInvalid">⚠ Invalid</button>
+          <button class="done-btn" id="actDone">✓ Done / Resolved</button>
+        </div>
+      </div>
+
+      <div class="messages" id="messages"></div>
+
+      <div class="reply-box" id="replyBox">
+        <div class="macro-wrap">
+          <button id="macroBtn" class="macro-btn" title="Sisipkan template macro">⚡</button>
+          <div class="macro-menu" id="macroMenu" style="display:none"></div>
+        </div>
+        <textarea id="replyText" placeholder="Tulis balasan..." rows="1"></textarea>
+        <button id="sendBtn">Kirim</button>
+      </div>
+    </div>
   </div>
 </main>
 
+<div class="toast" id="toast"></div>
+<div class="modal-backdrop" id="schedModal" style="display:none">
+  <div class="modal">
+    <h3>📅 Jadwalkan Follow-up</h3>
+    <p>Pilih tanggal kapan customer ini perlu di-follow-up kembali (mis. sesuai permintaan validasi di hari lain). Thread dikecualikan dari auto-blast attempt berikutnya.</p>
+    <input type="date" id="schedDateInput">
+    <div class="modal-actions">
+      <button class="cancel" id="schedCancel">Batal</button>
+      <button class="save" id="schedSave">Simpan</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const API_BASE = (window.APP_CONFIG && window.APP_CONFIG.API_BASE) || '';
-const $ = s => document.querySelector(s);
-function apiFetch(path, opts = {}) { return fetch(API_BASE + path, { credentials: 'include', ...opts }); }
-
 let me = null;
+let currentPhone = null;
+let currentBucket = 'after_blast';
+let currentTeam = '';
+let closingTemplateText = '';
+let pendingDone = false;
+let lastMessageID = 0;
+let allThreads = [];
+let searchTerm = '';
+
+const $ = s => document.querySelector(s);
+const $$ = s => document.querySelectorAll(s);
+const esc = s => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const initials = name => (name||'').split(/\s+/).slice(0,2).map(w=>w[0]||'').join('').toUpperCase() || '?';
+
+function apiFetch(path, opts = {}) {
+  return fetch(API_BASE + path, { credentials: 'include', ...opts });
+}
+
+// renderMsgBody — tampilkan isi pesan; kalau media sudah terunduh (media_url ada) render
+// inline sesuai tipe. Kalau media tapi belum terunduh → placeholder teks (mis. "[Gambar]").
+function renderMsgBody(m) {
+  if (m.media_url) {
+    const src = API_BASE + m.media_url;
+    if (m.media_type === 'image' || m.media_type === 'sticker') {
+      return `<img class="msg-media" src="${src}" alt="${esc(m.body)}" loading="lazy" onclick="window.open('${src}','_blank')">`;
+    }
+    if (m.media_type === 'video') {
+      return `<video class="msg-media" src="${src}" controls preload="metadata"></video>`;
+    }
+    if (m.media_type === 'audio') {
+      return `<audio class="msg-audio" src="${src}" controls preload="none"></audio>`;
+    }
+    // dokumen / lainnya → link unduh
+    return `<a class="msg-doc" href="${src}" target="_blank" rel="noopener">📄 ${esc(m.body || 'Dokumen')}</a>`;
+  }
+  if (m.is_media) return '<span class="media">' + esc(m.body) + '</span>';
+  return esc(m.body);
+}
+
+function showApiErr(msg) { $('#apiErrBanner').textContent = msg; $('#apiErrBanner').style.display = 'block'; }
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 2500); }
+
+const bucketLabels = { after_blast:'After Blast', open:'Open', in_progress:'In Progress', on_going:'On Going', scheduled:'Scheduled', force_close:'Force Close', done:'Done', invalid:'Invalid' };
+
 async function loadMe() {
   try {
     const r = await apiFetch('/api/me').then(r => r.json());
-    me = r.user || null;
-  } catch (e) { me = null; }
-  if (!me) { location.href = 'login.html'; return; }
-  $('#userName').textContent = me.name || me.email;
-  $('#userEmail').textContent = me.email;
-  if (me.picture) { $('#userAvatar').src = me.picture; } else { $('#userAvatar').style.display = 'none'; }
-  $('#userBox').style.visibility = 'visible';
+    me = r.user;
+    if (!me) { location.href = 'login.html'; return; }
+    $('#userName').textContent = me.name || me.email;
+    $('#userCardName').textContent = me.name || '(no name)';
+    $('#userCardEmail').textContent = me.email;
+    if (me.picture) $('#userAvatar').src = me.picture;
+    else $('#userAvatar').style.display = 'none';
+    $('#userBox').style.visibility = 'visible';
+  } catch (e) { showApiErr('Tidak bisa konek ke backend'); }
 }
 
 async function pollStatus() {
   try {
-    const s = await apiFetch('/api/status').then(r => r.json());
+    const r = await apiFetch('/api/zopoz/wa-status');
+    if (r.status === 401) { location.href = 'login.html'; return; }
+    const d = await r.json();
     const pill = $('#connStatus');
-    if (s.connected) { pill.textContent = 'WA Connected'; pill.className = 'status-pill ok'; }
-    else { pill.textContent = s.loggedIn ? 'WA Reconnecting…' : 'WA Belum Login'; pill.className = 'status-pill'; }
+    const badge = $('#waStatusBadge');
+    if (d.loggedIn && d.connected) {
+      pill.textContent = 'WA Connected'; pill.className = 'status-pill ok';
+      badge.textContent = 'WA Connected'; badge.style.background = 'rgba(154,207,135,.15)'; badge.style.color = 'var(--lime)';
+    } else {
+      pill.textContent = d.hasQR ? 'Scan QR' : 'Disconnected'; pill.className = 'status-pill warn';
+      badge.textContent = 'WA Disconnected'; badge.style.background = '#78350f'; badge.style.color = '#fde68a';
+    }
   } catch (e) {}
 }
 
-async function pollUnread() {
+async function loadThreads() {
   try {
-    const r = await apiFetch('/api/inbox/threads?status=open').then(r => r.json());
-    const unread = (r.counts && r.counts.unread) || 0;
-    const badge = $('#navUnread');
-    if (unread > 0) { badge.style.display = 'inline-block'; badge.textContent = unread; }
-    else { badge.style.display = 'none'; }
-  } catch (e) {}
+    const r = await apiFetch(`/api/zopoz/threads?status=${currentBucket}`).then(r => r.json());
+    $('#cAfterBlast').textContent = r.counts.after_blast || 0;
+    $('#cOpen').textContent = r.counts.open || 0;
+    $('#cProg').textContent = r.counts.in_progress || 0;
+    $('#cOnGoing').textContent = r.counts.on_going || 0;
+    $('#cScheduled').textContent = r.counts.scheduled || 0;
+    $('#cDone').textContent = r.counts.done || 0;
+    $('#cInvalid').textContent = r.counts.invalid || 0;
+    $('#cForceClose').textContent = r.counts.force_close || 0;
+
+    const unread = r.counts.unread || 0;
+    const navUnread = $('#navUnread');
+    if (unread > 0) { navUnread.style.display = 'inline-block'; navUnread.textContent = unread; }
+    else navUnread.style.display = 'none';
+
+    allThreads = r.threads || [];
+    populateTeamFilter(r.teams || []);
+    $('#listTitle').textContent = bucketLabels[currentBucket] || 'All';
+    $('#listCount').textContent = allThreads.length;
+    renderThreadList();
+  } catch (e) { console.error(e); }
 }
 
-$('#signoutBtn').addEventListener('click', async () => {
+function renderThreadList() {
+  const list = $('#threadList');
+  list.innerHTML = '';
+  let filtered = allThreads;
+  if (currentTeam) filtered = filtered.filter(t => (t.team||'') === currentTeam);
+  if (searchTerm) {
+    const s = searchTerm.toLowerCase();
+    filtered = filtered.filter(t =>
+      (t.nama_outlet||'').toLowerCase().includes(s)
+      || t.phone.includes(s)
+      || (t.nomer_invoice||'').toLowerCase().includes(s)
+      || (t.last_preview||'').toLowerCase().includes(s));
+  }
+  if (!filtered.length) {
+    list.innerHTML = '<div class="empty">Tidak ada thread' + (currentTeam ? ' untuk team ini' : ' di bucket ini') + '.<br/><small>Coba ganti filter/bucket atau Sync Team.</small></div>';
+    return;
+  }
+  filtered.forEach(t => {
+    const div = document.createElement('div');
+    div.className = 'thread-item';
+    if (t.phone === currentPhone) div.classList.add('selected');
+    const time = t.last_message_at ? new Date(t.last_message_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : '';
+    const namaDisplay = t.nama_outlet || t.phone;
+    const previewPrefix = t.last_direction === 'in' ? '' : 'Anda: ';
+    div.innerHTML = `
+      <div class="avatar">${esc(initials(namaDisplay))}</div>
+      <div class="body">
+        <div class="top">
+          <span class="name">${esc(namaDisplay)}</span>
+          <span class="time">${time}</span>
+        </div>
+        <div class="phone">+${esc(t.phone)}</div>
+        <div class="preview">${esc(previewPrefix + (t.last_preview || ''))}</div>
+        <span class="status-tag ${t.status}">${esc(bucketLabels[t.status]||t.status)}</span>
+        ${t.team ? '<span class="team-tag">'+esc(t.team)+'</span>' : ''}
+        ${t.status === 'scheduled' && t.followup_at ? '<div class="followup">📅 Follow-up: '+esc(fmtDate(t.followup_at))+'</div>' : ''}
+      </div>
+      ${t.unread_count > 0 ? '<span class="unread">'+t.unread_count+'</span>' : ''}`;
+    div.addEventListener('click', () => selectThread(t.phone));
+    list.appendChild(div);
+  });
+}
+
+async function selectThread(phone) {
+  currentPhone = phone;
+  lastMessageID = 0;
+  pendingDone = false;
+  $('#sendBtn').textContent = 'Kirim';
+  $$('#threadList .thread-item').forEach(d => d.classList.remove('selected'));
+  $('#chatEmpty').style.display = 'none';
+  $('#chatContent').style.display = 'flex';
+  await loadMessages(true);
+  await apiFetch(`/api/zopoz/read?phone=${encodeURIComponent(phone)}`, { method: 'POST' });
+  loadThreads();
+}
+
+async function loadMessages(scrollBottom) {
+  if (!currentPhone) return;
+  try {
+    const r = await apiFetch(`/api/zopoz/messages?phone=${encodeURIComponent(currentPhone)}`).then(r => r.json());
+    closingTemplateText = r.closing_template || '';
+    const nama = r.nama_outlet || '(no outlet)';
+    $('#hName').textContent = nama;
+    $('#hPhone').textContent = '+' + currentPhone;
+    $('#hAvatar').textContent = initials(nama);
+    if (r.assigned_name) {
+      $('#hAssign').textContent = 'PIC: ' + r.assigned_name;
+      $('#hAssign').style.display = '';
+    } else {
+      $('#hAssign').style.display = 'none';
+    }
+    if (r.status === 'scheduled' && r.followup_at) {
+      $('#hFollowup').textContent = '📅 Follow-up: ' + fmtDate(r.followup_at);
+      $('#hFollowup').style.display = '';
+    } else {
+      $('#hFollowup').style.display = 'none';
+    }
+
+    // Action buttons & reply lock. done/invalid = terminal (terkunci, bisa Reopen).
+    const replyBox = $('#replyBox');
+    const terminal = (r.status === 'done' || r.status === 'invalid');
+    const ongoing = (r.status === 'on_going');
+    const scheduled = (r.status === 'scheduled');
+    const parked = ongoing || scheduled; // keluar antrian retry, tampilkan Reopen
+    if (terminal) {
+      $('#actDone').style.display = 'none';
+      $('#actInvalid').style.display = 'none';
+      $('#actOnGoing').style.display = 'none';
+      $('#actScheduled').style.display = 'none';
+      $('#actForceClose').style.display = 'none';
+      $('#actReopen').style.display = '';
+      replyBox.classList.add('locked');
+      $('#replyText').placeholder = (r.status === 'invalid')
+        ? 'Thread ditandai Invalid. Reopen untuk aktifkan lagi.'
+        : 'Thread sudah Done. Reopen untuk aktifkan lagi.';
+    } else {
+      $('#actDone').style.display = '';
+      $('#actInvalid').style.display = '';
+      // On Going / Scheduled tampil saat aktif; saat sudah di status itu → ganti jadi Reopen
+      $('#actOnGoing').style.display = ongoing ? 'none' : '';
+      $('#actScheduled').style.display = scheduled ? 'none' : '';
+      // Force Close manual: tampil di status aktif, sembunyi kalau sudah force_close
+      $('#actForceClose').style.display = (r.status === 'force_close') ? 'none' : '';
+      $('#actReopen').style.display = parked ? '' : 'none';
+      replyBox.classList.remove('locked');
+      $('#replyText').placeholder = scheduled ? 'Dijadwalkan validasi lain hari. Tulis balasan...'
+        : (ongoing ? 'Sedang divalidasi (On Going). Tulis balasan...' : 'Tulis balasan...');
+    }
+
+    const msgs = r.messages || [];
+    const newMaxID = msgs.length ? msgs[msgs.length-1].id : 0;
+    if (newMaxID === lastMessageID && $('#messages').children.length > 0) return;
+    lastMessageID = newMaxID;
+
+    const list = $('#messages');
+    list.innerHTML = '';
+    let lastDate = '';
+    msgs.forEach(m => {
+      const d = new Date(m.timestamp);
+      const dateStr = d.toLocaleDateString('id-ID', {weekday:'long',day:'numeric',month:'short'});
+      if (dateStr !== lastDate) {
+        const sep = document.createElement('div');
+        sep.className = 'day-sep';
+        sep.textContent = dateStr;
+        list.appendChild(sep);
+        lastDate = dateStr;
+      }
+      const div = document.createElement('div');
+      div.className = 'msg ' + m.direction;
+      const timeStr = d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+      const sender = m.direction === 'out' && m.sender_name ? esc(m.sender_name) : (m.direction === 'in' ? 'User' : 'Blast');
+      div.innerHTML = renderMsgBody(m) + `<div class="meta">${sender} · ${timeStr}</div>`;
+      list.appendChild(div);
+    });
+    if (scrollBottom) list.scrollTop = list.scrollHeight;
+  } catch (e) { console.error(e); }
+}
+
+// Done = muat closing message ke kotak balasan agar agent bisa edit dulu.
+// Thread baru pindah ke Done SETELAH agent menekan Kirim (lihat sendReply).
+$('#actDone').addEventListener('click', () => {
+  if (!currentPhone) return;
+  const ta = $('#replyText');
+  ta.value = closingTemplateText || '';
+  ta.style.height = 'auto';
+  ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
+  ta.focus();
+  pendingDone = true;
+  $('#sendBtn').textContent = 'Kirim & Tutup';
+  toast('✏️ Closing message dimuat. Edit bila perlu, lalu "Kirim & Tutup" untuk menutup thread.');
+});
+
+// Invalid — nomor salah / perlu revisi. Tidak kirim pesan, pindah ke bucket Invalid.
+$('#actInvalid').addEventListener('click', async () => {
+  if (!currentPhone) return;
+  if (!confirm('Tandai thread ini sebagai INVALID?\n\nPakai kalau nomor salah / perlu revisi. TIDAK ada pesan yang dikirim. Thread pindah ke bucket Invalid & dikunci.')) return;
+  $('#actInvalid').disabled = true;
+  try {
+    const fd = new FormData(); fd.append('status', 'invalid');
+    const r = await apiFetch(`/api/zopoz/status?phone=${encodeURIComponent(currentPhone)}`, { method: 'POST', body: fd });
+    if (!r.ok) { alert('Gagal: ' + await r.text()); return; }
+    toast('⚠ Thread ditandai Invalid.');
+    await loadMessages(false);
+    loadThreads();
+  } finally {
+    $('#actInvalid').disabled = false;
+  }
+});
+
+// On Going — tandai nomor sedang divalidasi. Tidak kirim pesan. Keluar dari antrian
+// auto-retry (cron cuma proses after_blast + in_progress). Sticky sampai Done/Invalid/Reopen.
+$('#actOnGoing').addEventListener('click', async () => {
+  if (!currentPhone) return;
+  $('#actOnGoing').disabled = true;
+  try {
+    const fd = new FormData(); fd.append('status', 'on_going');
+    const r = await apiFetch(`/api/zopoz/status?phone=${encodeURIComponent(currentPhone)}`, { method: 'POST', body: fd });
+    if (!r.ok) { alert('Gagal: ' + await r.text()); return; }
+    toast('⏳ Thread ditandai On Going (sedang divalidasi).');
+    await loadMessages(false);
+    loadThreads();
+  } finally {
+    $('#actOnGoing').disabled = false;
+  }
+});
+
+// Scheduled — customer minta validasi di hari lain. Tidak kirim pesan. Keluar dari antrian
+// auto-retry (cron & manual cuma proses after_blast + in_progress) supaya tidak ter-blast
+// attempt berikutnya. Sticky sampai Done/Invalid/Reopen.
+// Format tanggal "YYYY-MM-DD" → "24 Jun 2026" (id-ID). "" kalau kosong/invalid.
+function fmtDate(s) {
+  if (!s) return '';
+  const d = new Date(s.slice(0, 10) + 'T00:00:00');
+  if (isNaN(d)) return s;
+  return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+let schedPendingPhone = null;
+$('#actScheduled').addEventListener('click', () => {
+  if (!currentPhone) return;
+  schedPendingPhone = currentPhone;
+  // default: besok
+  const d = new Date(); d.setDate(d.getDate() + 1);
+  $('#schedDateInput').value = d.toISOString().slice(0, 10);
+  $('#schedModal').style.display = 'flex';
+});
+$('#schedCancel').addEventListener('click', () => { $('#schedModal').style.display = 'none'; });
+$('#schedModal').addEventListener('click', (e) => { if (e.target.id === 'schedModal') $('#schedModal').style.display = 'none'; });
+$('#schedSave').addEventListener('click', async () => {
+  const date = $('#schedDateInput').value;
+  if (!date) { alert('Pilih tanggal follow-up dulu.'); return; }
+  const phone = schedPendingPhone || currentPhone;
+  if (!phone) return;
+  $('#schedSave').disabled = true;
+  try {
+    const fd = new FormData();
+    fd.append('status', 'scheduled');
+    fd.append('followup_at', date);
+    const r = await apiFetch(`/api/zopoz/status?phone=${encodeURIComponent(phone)}`, { method: 'POST', body: fd });
+    if (!r.ok) { alert('Gagal: ' + await r.text()); return; }
+    $('#schedModal').style.display = 'none';
+    toast('📅 Dijadwalkan follow-up ' + fmtDate(date) + ' — dikecualikan dari auto-blast attempt berikutnya.');
+    await loadMessages(false);
+    loadThreads();
+  } finally {
+    $('#schedSave').disabled = false;
+  }
+});
+
+// Force Close manual — tutup paksa thread (masuk bucket Force Close). Tidak kirim pesan.
+// TIDAK mengubah logic auto force-close 17:00; cuma set status manual. Jika customer balas
+// nanti, thread otomatis kembali ke Open (perilaku force_close yang sudah ada).
+$('#actForceClose').addEventListener('click', async () => {
+  if (!currentPhone) return;
+  if (!confirm('Force Close thread ini?\n\nThread ditutup paksa & masuk bucket Force Close. Tidak ada pesan yang dikirim.\nJika customer membalas nanti, thread otomatis kembali ke Open.')) return;
+  $('#actForceClose').disabled = true;
+  try {
+    const fd = new FormData(); fd.append('status', 'force_close');
+    const r = await apiFetch(`/api/zopoz/status?phone=${encodeURIComponent(currentPhone)}`, { method: 'POST', body: fd });
+    if (!r.ok) { alert('Gagal: ' + await r.text()); return; }
+    toast('⛔ Thread di-Force Close.');
+    await loadMessages(false);
+    loadThreads();
+  } finally {
+    $('#actForceClose').disabled = false;
+  }
+});
+
+// Reopen — manual escape Done
+$('#actReopen').addEventListener('click', async () => {
+  if (!currentPhone) return;
+  if (!confirm('Reopen thread? Status akan kembali ke Open.\nReply user berikutnya akan tertangkap normal lagi.')) return;
+  const fd = new FormData();
+  fd.append('status', 'open');
+  await apiFetch(`/api/zopoz/status?phone=${encodeURIComponent(currentPhone)}`, { method: 'POST', body: fd });
+  toast('↺ Thread di-reopen ke Open.');
+  await loadMessages(false);
+  loadThreads();
+});
+
+// ---- Macro quick-reply: sisipkan template ke kotak balasan utk diedit lalu kirim ----
+const MACROS = [
+  { label: 'Validasi sekarang via WA call?',
+    text: 'Baik kak, apakah berkenan kami lakukan validasi sekarang via whatsapp call? mohon konfirmasinya ya kak' },
+  { label: 'Tim validator akan menghubungi (tunggu)',
+    text: 'Baik kak, nantinya tim validator kami akan menghubungi kakak via whatsapp call. Mohon kesediaannya untuk menunggu. Terima kasih' },
+  { label: 'Follow up — belum ada respon validasi',
+    text: 'Halo kak, Mohon maaf sebelumnya tim validator kami sudah mencoba menghubungi untuk proses validasi namun belum ada respon. Mohon konfirmasinya kembali ya kak jika sudah bersedia untuk dilakukan validasi. Terima kasih' },
+  { label: 'Jadwal training',
+    text: 'Halo kak, sesuai informasi sebelumnya, untuk jadwal trainingnya sudah kami jadwalkan pada:\n\nHari/Tanggal :\nPukul : \nTipe Training : Online/Offline\n\nNantinya tim trainer kami akan menghubungi kakak kembali untuk informasi lebih lanjut.\n\nTerima kasih' },
+  { label: 'Konfirmasi aktivasi selesai',
+    text: 'Halo kak, sesuai informasi sebelumnya, untuk aktivasinya sudah selesai kami lakukan dengan data sebagai berikut:\n\nNama Outlet : \nEmail : \nJenis Aktivasi : New/Tambah Cabang\n\nTerima kasih' },
+];
+
+function buildMacroMenu() {
+  const menu = $('#macroMenu');
+  menu.innerHTML = MACROS.map((m, i) =>
+    `<div class="macro-item" data-i="${i}"><span class="mt">${esc(m.label)}</span><span class="mp">${esc(m.text.replace(/\n+/g, ' '))}</span></div>`
+  ).join('');
+  menu.querySelectorAll('.macro-item').forEach(el => {
+    el.addEventListener('click', () => {
+      const ta = $('#replyText');
+      ta.value = MACROS[+el.dataset.i].text;
+      ta.style.height = 'auto';
+      ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
+      ta.focus();
+      menu.style.display = 'none';
+    });
+  });
+}
+$('#macroBtn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const menu = $('#macroMenu');
+  if (menu.style.display === 'none') { buildMacroMenu(); menu.style.display = 'block'; }
+  else { menu.style.display = 'none'; }
+});
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.macro-wrap')) $('#macroMenu').style.display = 'none';
+});
+
+// Reply
+$('#sendBtn').addEventListener('click', sendReply);
+$('#replyText').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); sendReply(); }
+});
+$('#replyText').addEventListener('input', e => {
+  e.target.style.height = 'auto';
+  e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+});
+
+async function sendReply() {
+  const text = $('#replyText').value.trim();
+  if (!text || !currentPhone) return;
+  const closing = pendingDone;            // tutup thread setelah kirim?
+  $('#sendBtn').disabled = true;
+  $('#sendBtn').textContent = '...';
+  const fd = new FormData();
+  fd.append('body', text);
+  try {
+    const r = await apiFetch(`/api/zopoz/reply?phone=${encodeURIComponent(currentPhone)}`, { method: 'POST', body: fd });
+    if (!r.ok) { alert('Gagal: ' + await r.text()); return; }
+    $('#replyText').value = ''; $('#replyText').style.height = 'auto';
+    if (closing) {
+      const sf = new FormData(); sf.append('status', 'done');
+      const sr = await apiFetch(`/api/zopoz/status?phone=${encodeURIComponent(currentPhone)}`, { method: 'POST', body: sf });
+      if (sr.ok) { pendingDone = false; toast('✅ Pesan terkirim. Thread ditutup (Done).'); }
+      else { alert('Pesan terkirim, tapi gagal menutup thread: ' + await sr.text()); }
+    }
+    await loadMessages(true);
+    loadThreads();
+  } finally {
+    $('#sendBtn').disabled = false;
+    $('#sendBtn').textContent = pendingDone ? 'Kirim & Tutup' : 'Kirim';
+  }
+}
+
+// Bucket tabs
+$$('.bucket-btn').forEach(b => b.addEventListener('click', () => {
+  $$('.bucket-btn').forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+  currentBucket = b.dataset.bucket;
+  loadThreads();
+}));
+
+// Search
+$('#searchInput').addEventListener('input', e => {
+  searchTerm = e.target.value.trim();
+  renderThreadList();
+});
+
+// Team filter — isi dropdown dari daftar team (pertahankan pilihan saat reload)
+function populateTeamFilter(teams) {
+  const sel = $('#teamFilter');
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">Semua Team</option>' +
+    teams.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('');
+  if (teams.includes(prev)) sel.value = prev; else { sel.value = ''; currentTeam = ''; }
+}
+$('#teamFilter').addEventListener('change', e => {
+  currentTeam = e.target.value;
+  renderThreadList();
+});
+
+$('#signoutBtn').addEventListener('click', async e => {
+  e.preventDefault();
   await apiFetch('/auth/logout', { method: 'POST' });
   location.href = 'login.html';
 });
 
+// Init
 loadMe().then(() => {
-  if (me) {
-    pollStatus(); setInterval(pollStatus, 2500);
-    pollUnread(); setInterval(pollUnread, 8000);
-  }
+  if (!me) return;
+  pollStatus(); setInterval(pollStatus, 3000);
+  loadThreads(); setInterval(loadThreads, 5000);
+  setInterval(() => { if (currentPhone) loadMessages(false); }, 3000);
 });
 </script>
 </body>

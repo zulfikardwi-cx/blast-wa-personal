@@ -53,7 +53,15 @@ func main() {
 	if err := initChat(); err != nil {
 		log.Fatalf("chat: %v", err)
 	}
+	// Zopoz (line WA kedua) — tabel terpisah di auditDB. Non-fatal kalau gagal.
+	if err := initZopozChat(); err != nil {
+		log.Fatalf("zopoz chat: %v", err)
+	}
+	if err := initZopozBlastAudit(); err != nil {
+		log.Fatalf("zopoz blast audit: %v", err)
+	}
 	startRetryScheduler()
+	startZopozRetryScheduler()
 
 	rootCtx := context.Background()
 	dbLog := waLog.Stdout("Database", "WARN", true)
@@ -95,6 +103,12 @@ func main() {
 	})
 
 	go connectAndPair(client)
+
+	// Zopoz: client WA kedua dengan session store terpisah (session/store-zopoz.db).
+	// Non-fatal — kalau gagal, blast/inbox utama tetap jalan.
+	if err := initZopozClient(rootCtx); err != nil {
+		log.Printf("zopoz client init gagal (fitur Zopoz mati, blast/inbox utama tetap jalan): %v", err)
+	}
 
 	mux := http.NewServeMux()
 
@@ -142,6 +156,21 @@ func main() {
 	// token HMAC di query string (?id=&t=). Lihat media.go.
 	mux.HandleFunc("/api/inbox/media", handleInboxMedia)
 
+	// ---- Zopoz (line WA kedua) — namespace /api/zopoz/* terpisah total ----
+	mux.HandleFunc("/api/zopoz/wa-status", corsMiddleware(requireAuth(zopozHandleStatus)))
+	mux.HandleFunc("/api/zopoz/qr", corsMiddleware(requireAuth(zopozHandleQR)))
+	mux.HandleFunc("/api/zopoz/wa-logout", corsMiddleware(requireAuth(zopozHandleLogout)))
+	mux.HandleFunc("/api/zopoz/templates", corsMiddleware(requireAuth(handleTemplates)))
+	mux.HandleFunc("/api/zopoz/blast", corsMiddleware(requireAuth(zopozHandleBlast)))
+	mux.HandleFunc("/api/zopoz/progress", corsMiddleware(requireAuth(zopozHandleProgress)))
+	mux.HandleFunc("/api/zopoz/history", corsMiddleware(requireAuth(zopozHandleHistory)))
+	mux.HandleFunc("/api/zopoz/threads", corsMiddleware(requireAuth(zopozHandleThreads)))
+	mux.HandleFunc("/api/zopoz/messages", corsMiddleware(requireAuth(zopozHandleMessages)))
+	mux.HandleFunc("/api/zopoz/read", corsMiddleware(requireAuth(zopozHandleMarkRead)))
+	mux.HandleFunc("/api/zopoz/status", corsMiddleware(requireAuth(zopozHandleSetStatus)))
+	mux.HandleFunc("/api/zopoz/reply", corsMiddleware(requireAuth(zopozHandleReply)))
+	mux.HandleFunc("/api/zopoz/media", zopozHandleMedia)
+
 	addr := os.Getenv("ADDR")
 	if addr == "" {
 		addr = ":8080"
@@ -160,6 +189,9 @@ func main() {
 	<-stop
 	log.Println("shutting down")
 	client.Disconnect()
+	if zopozState.client != nil {
+		zopozState.client.Disconnect()
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(ctx)
