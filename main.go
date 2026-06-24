@@ -60,6 +60,7 @@ func main() {
 	if err := initZopozBlastAudit(); err != nil {
 		log.Fatalf("zopoz blast audit: %v", err)
 	}
+	initZopozSheetName()
 	startRetryScheduler()
 	startZopozRetryScheduler()
 
@@ -164,6 +165,8 @@ func main() {
 	mux.HandleFunc("/api/zopoz/blast", corsMiddleware(requireAuth(zopozHandleBlast)))
 	mux.HandleFunc("/api/zopoz/progress", corsMiddleware(requireAuth(zopozHandleProgress)))
 	mux.HandleFunc("/api/zopoz/history", corsMiddleware(requireAuth(zopozHandleHistory)))
+	mux.HandleFunc("/api/zopoz/sheet-status", corsMiddleware(requireAuth(zopozHandleSheetStatus)))
+	mux.HandleFunc("/api/zopoz/export-sheet", corsMiddleware(requireAuth(zopozHandleExportSheet)))
 	mux.HandleFunc("/api/zopoz/threads", corsMiddleware(requireAuth(zopozHandleThreads)))
 	mux.HandleFunc("/api/zopoz/messages", corsMiddleware(requireAuth(zopozHandleMessages)))
 	mux.HandleFunc("/api/zopoz/read", corsMiddleware(requireAuth(zopozHandleMarkRead)))

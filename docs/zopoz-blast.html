@@ -189,6 +189,8 @@
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap">
         <span style="color:var(--muted);font-size:12px">100 blast Zopoz terakhir, lintas semua user</span>
         <span style="flex:1"></span>
+        <span id="sheetStatus" style="font-size:12px;color:var(--muted)"></span>
+        <button id="exportSheetBtn" style="display:none">📊 Export ke Google Sheet</button>
         <button class="ghost" id="refreshHistory">Refresh</button>
       </div>
       <div class="scroll"><table id="historyTable">
@@ -434,6 +436,37 @@ $$('.pane-tab').forEach(t => t.addEventListener('click', () => {
 
 $('#refreshHistory').addEventListener('click', loadHistory);
 
+// Export riwayat blast Zopoz ke Google Sheet (tab "Log Blast Zopoz", terpisah dari majoo)
+let sheetCfg = null;
+async function loadSheetStatus() {
+  try {
+    const r = await apiFetch('/api/zopoz/sheet-status');
+    if (!r.ok) throw new Error('offline');
+    const d = await r.json();
+    sheetCfg = d;
+    if (d.enabled) {
+      $('#exportSheetBtn').style.display = '';
+      $('#sheetStatus').innerHTML = `Tab: <a href="${d.sheet_url}" target="_blank" style="color:var(--teal)">${esc(d.sheet_name)}</a>`;
+    } else {
+      $('#sheetStatus').textContent = 'Sheets export belum aktif';
+    }
+  } catch (e) {}
+}
+
+$('#exportSheetBtn').addEventListener('click', async () => {
+  const btn = $('#exportSheetBtn');
+  const original = btn.textContent;
+  btn.disabled = true; btn.textContent = '⏳ Exporting...';
+  try {
+    const r = await apiFetch('/api/zopoz/export-sheet', { method: 'POST' });
+    if (!r.ok) { alert('Export gagal: ' + await r.text()); btn.textContent = original; btn.disabled = false; return; }
+    const d = await r.json();
+    btn.textContent = `✅ ${d.rows} baris ke-export`;
+    setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 3000);
+    if (d.sheet_url) window.open(d.sheet_url, '_blank');
+  } catch (e) { alert('Export error: ' + e.message); btn.textContent = original; btn.disabled = false; }
+});
+
 function attemptBadge(a) {
   const n = (a === undefined || a === null) ? 1 : a;
   if (n === 0) return '<span class="att-badge att-mix">2 & 3</span>';
@@ -492,6 +525,7 @@ loadMe().then(() => {
   if (me) {
     pollStatus(); setInterval(pollStatus, 2500);
     loadTemplates();
+    loadSheetStatus();
     pollUnread(); setInterval(pollUnread, 8000);
     resumeProgressIfRunning();
   }
