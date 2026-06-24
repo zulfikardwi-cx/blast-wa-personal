@@ -21,6 +21,14 @@
   header a.nav{color:var(--muted);text-decoration:none;font-size:13px;padding:4px 10px;border-radius:6px;border:1px solid var(--line)}
   header a.nav:hover{color:var(--teal);border-color:var(--teal)}
   header a.nav.active{color:var(--teal);border-color:var(--teal);background:var(--teal-soft)}
+  header .brand{display:inline-flex;align-items:center;text-decoration:none;transition:opacity .12s}
+  header .brand:hover{opacity:.8}
+  header .brand .zlogo{height:15px;width:auto;display:block}
+  header .brand-majoo:not(.active) .logo{filter:grayscale(1) opacity(.5)}
+  .subnav{padding:8px 24px;border-bottom:1px solid var(--line);background:var(--panel2);display:flex;gap:8px;align-items:center;flex-shrink:0}
+  .subnav a{font-size:12px;color:var(--muted);text-decoration:none;padding:4px 10px;border-radius:6px;border:1px solid var(--line)}
+  .subnav a:hover{color:var(--teal);border-color:var(--teal)}
+  .subnav a.active{color:var(--teal);border-color:var(--teal);background:var(--teal-soft)}
   .status-pill{font-size:12px;padding:4px 10px;border-radius:999px;background:#1f2937;color:var(--muted)}
   .status-pill.ok{background:rgba(45,189,182,.2);color:var(--teal)}
   .status-pill.warn{background:#78350f;color:#fde68a}
@@ -98,12 +106,9 @@
 <body>
 <div id="apiErrBanner" class="global-err" style="display:none"></div>
 <header>
-  <img src="assets/majoo-logo.svg" class="logo" alt="majoo" />
+  <a href="index.html" class="brand brand-majoo active" title="majoo — Blast / Inbox / Upsell"><img src="assets/majoo-logo.svg" class="logo" alt="majoo" /></a>
   <div class="sep"></div>
-  <a href="index.html" class="nav active">Blast</a>
-  <a href="inbox.html" class="nav" id="navInbox">Inbox <span id="navUnread" style="background:var(--lime);color:#0b1220;padding:1px 6px;border-radius:8px;margin-left:4px;font-size:10px;display:none"></span></a>
-  <a href="upsell.html" class="nav">Upsell</a>
-  <a href="zopoz-blast.html" class="nav">Zopoz</a>
+  <a href="zopoz-blast.html" class="brand brand-zopoz" title="Zopoz — Blast / Inbox / Upsell"><img src="assets/zopoz-logo-muted.svg" class="zlogo" alt="Zopoz" /></a>
   <span id="connStatus" class="status-pill">checking...</span>
   <span style="flex:1"></span>
   <div class="user" id="userBox" style="visibility:hidden">
@@ -113,6 +118,12 @@
   <button id="logoutBtn" class="ghost" style="display:none">Logout WA</button>
   <button id="signoutBtn" class="ghost">Sign out</button>
 </header>
+
+<div class="subnav">
+  <a href="index.html" class="active">📤 Blast</a>
+  <a href="inbox.html">📥 Inbox <span id="navUnread" style="background:var(--lime);color:#0b1220;padding:1px 6px;border-radius:8px;margin-left:4px;font-size:10px;display:none"></span></a>
+  <a href="upsell.html">🛍️ Upsell</a>
+</div>
 
 <main>
   <section class="card">

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Upsell — Blast WA Personal</title>
+<title>Zopoz Upsell — Blast WA Personal</title>
 <script src="config.js"></script>
 <style>
   :root {
@@ -17,9 +17,6 @@
   header{padding:14px 24px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:16px;background:var(--panel)}
   header .logo{height:28px;width:auto;display:block}
   header .sep{width:1px;height:24px;background:var(--line)}
-  header a.nav{color:var(--muted);text-decoration:none;font-size:13px;padding:4px 10px;border-radius:6px;border:1px solid var(--line)}
-  header a.nav:hover{color:var(--teal);border-color:var(--teal)}
-  header a.nav.active{color:var(--teal);border-color:var(--teal);background:var(--teal-soft)}
   header .brand{display:inline-flex;align-items:center;text-decoration:none;transition:opacity .12s}
   header .brand:hover{opacity:.8}
   header .brand .zlogo{height:15px;width:auto;display:block}
@@ -28,8 +25,10 @@
   .subnav a{font-size:12px;color:var(--muted);text-decoration:none;padding:4px 10px;border-radius:6px;border:1px solid var(--line)}
   .subnav a:hover{color:var(--teal);border-color:var(--teal)}
   .subnav a.active{color:var(--teal);border-color:var(--teal);background:var(--teal-soft)}
+  .subnav .hint{font-size:11px;color:var(--muted);margin-left:auto}
   .status-pill{font-size:12px;padding:4px 10px;border-radius:999px;background:#1f2937;color:var(--muted)}
   .status-pill.ok{background:rgba(45,189,182,.2);color:var(--teal)}
+  .status-pill.warn{background:#78350f;color:#fde68a}
   .user{display:flex;align-items:center;gap:8px}
   .user img{width:28px;height:28px;border-radius:50%;background:var(--line)}
   .user .uname b{font-size:12px;display:block}
@@ -46,9 +45,9 @@
 </head>
 <body>
 <header>
-  <a href="index.html" class="brand brand-majoo active" title="majoo — Blast / Inbox / Upsell"><img src="assets/majoo-logo.svg" class="logo" alt="majoo" /></a>
+  <a href="index.html" class="brand brand-majoo" title="majoo — Blast / Inbox / Upsell"><img src="assets/majoo-logo.svg" class="logo" alt="majoo" /></a>
   <div class="sep"></div>
-  <a href="zopoz-blast.html" class="brand brand-zopoz" title="Zopoz — Blast / Inbox / Upsell"><img src="assets/zopoz-logo-muted.svg" class="zlogo" alt="Zopoz" /></a>
+  <a href="zopoz-blast.html" class="brand brand-zopoz active" title="Zopoz — Blast / Inbox / Upsell"><img src="assets/zopoz-logo-teal.svg" class="zlogo" alt="Zopoz" /></a>
   <span id="connStatus" class="status-pill">checking...</span>
   <span style="flex:1"></span>
   <div class="user" id="userBox" style="visibility:hidden">
@@ -59,16 +58,17 @@
 </header>
 
 <div class="subnav">
-  <a href="index.html">📤 Blast</a>
-  <a href="inbox.html">📥 Inbox <span id="navUnread" style="background:var(--lime);color:#0b1220;padding:1px 6px;border-radius:8px;margin-left:4px;font-size:10px;display:none"></span></a>
-  <a href="upsell.html" class="active">🛍️ Upsell</a>
+  <a href="zopoz-blast.html">📤 Blast</a>
+  <a href="zopoz.html">📥 Inbox <span id="navUnread" style="background:var(--lime);color:#0b1220;padding:1px 6px;border-radius:8px;margin-left:4px;font-size:10px;display:none"></span></a>
+  <a href="zopoz-upsell.html" class="active">🛍️ Upsell</a>
+  <span class="hint">Suite Zopoz — nomor WhatsApp terpisah dari majoo.</span>
 </div>
 
 <main>
   <div class="card">
     <div class="ic">🛍️</div>
-    <h2>Upsell</h2>
-    <p>Halaman ini sedang disiapkan. Fitur & logic Upsell akan ditambahkan menyusul.</p>
+    <h2>Zopoz Upsell</h2>
+    <p>Halaman ini sedang disiapkan. Fitur &amp; logic Upsell Zopoz akan ditambahkan menyusul, menggunakan nomor WhatsApp Zopoz yang terpisah dari majoo.</p>
     <span class="badge-soon">Segera hadir</span>
   </div>
 </main>
@@ -92,18 +92,24 @@ async function loadMe() {
 }
 
 async function pollStatus() {
-  try {
-    const s = await apiFetch('/api/status').then(r => r.json());
-    const pill = $('#connStatus');
-    if (s.connected) { pill.textContent = 'WA Connected'; pill.className = 'status-pill ok'; }
-    else { pill.textContent = s.loggedIn ? 'WA Reconnecting…' : 'WA Belum Login'; pill.className = 'status-pill'; }
-  } catch (e) {}
+  let r;
+  try { r = await apiFetch('/api/zopoz/wa-status'); } catch (e) { showOffline(); return; }
+  if (r.status === 401) { location.href = 'login.html'; return; }
+  if (!r.ok) { showOffline(); return; }
+  let s;
+  try { s = await r.json(); } catch (e) { showOffline(); return; }
+  const pill = $('#connStatus');
+  if (s.connected) { pill.textContent = 'Zopoz Connected'; pill.className = 'status-pill ok'; }
+  else { pill.textContent = s.loggedIn ? 'Zopoz Reconnecting…' : 'Zopoz Belum Login'; pill.className = 'status-pill warn'; }
 }
+function showOffline() { const p = $('#connStatus'); p.textContent = 'Zopoz belum aktif'; p.className = 'status-pill warn'; }
 
 async function pollUnread() {
   try {
-    const r = await apiFetch('/api/inbox/threads?status=open').then(r => r.json());
-    const unread = (r.counts && r.counts.unread) || 0;
+    const r = await apiFetch('/api/zopoz/threads?status=open');
+    if (!r.ok) return;
+    const d = await r.json();
+    const unread = (d.counts && d.counts.unread) || 0;
     const badge = $('#navUnread');
     if (unread > 0) { badge.style.display = 'inline-block'; badge.textContent = unread; }
     else { badge.style.display = 'none'; }
