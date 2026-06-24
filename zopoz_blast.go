@@ -15,6 +15,7 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -180,7 +181,7 @@ func zopozHandleBlast(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 400, "form: %v", err)
 		return
 	}
-	template := GetAttemptTemplate(1)
+	template := zopozGetAttemptTemplate(1)
 	minDelay := atoiOr(r.FormValue("min_delay"), 20)
 	maxDelay := atoiOr(r.FormValue("max_delay"), 40)
 	if minDelay < 2 {
@@ -455,7 +456,7 @@ WHERE status IN ('after_blast', 'in_progress')
 	if auditEmail == "" {
 		auditEmail = "system@retry"
 	}
-	auditTemplate := GetAttemptTemplate(targetAttempt)
+	auditTemplate := zopozGetAttemptTemplate(targetAttempt)
 	auditAttempt := targetAttempt
 	if targetAttempt != 2 && targetAttempt != 3 {
 		auditTemplate = "Retry Attempt 2 & 3"
@@ -472,7 +473,7 @@ WHERE status IN ('after_blast', 'in_progress')
 			continue
 		}
 		nextAttempt := rr.currentAttempt + 1
-		template := GetAttemptTemplate(nextAttempt)
+		template := zopozGetAttemptTemplate(nextAttempt)
 		body := renderTemplateWithVars(template, rr.namaOutlet, rr.nomerInvoice)
 
 		if err := zopozSendRetryOne(rr.phone, body); err != nil {
@@ -596,4 +597,85 @@ func zopozSendRetryOne(phone, body string) error {
 	msg := &waProto.Message{Conversation: proto.String(body)}
 	_, err = zopozState.client.SendMessage(ctx, jid, msg)
 	return err
+}
+
+// ---- manual retry endpoints (Blast manual Attempt 2/3 dari tab Log Status) ----
+
+// zopozHandleRetryPreview — daftar nomor yang BENAR-BENAR akan diblast kalau Run ditekan
+// (after_blast/in_progress, attempt<3, belum dikirim hari ini). Tidak mengirim apa pun.
+func zopozHandleRetryPreview(w http.ResponseWriter, r *http.Request) {
+	now := time.Now().In(wibLoc)
+	startOfToday := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, wibLoc)
+	rows, err := auditDB.Query(`
+SELECT phone, COALESCE(nama_outlet,''), COALESCE(nomer_invoice,''), current_attempt, status, COALESCE(last_attempt_at,'')
+FROM zopoz_threads
+WHERE status IN ('after_blast','in_progress') AND current_attempt < 3
+ORDER BY current_attempt DESC, last_attempt_at ASC`)
+	if err != nil {
+		httpErr(w, 500, "query: %v", err)
+		return
+	}
+	defer rows.Close()
+	type previewRow struct {
+		Phone          string `json:"phone"`
+		NamaOutlet     string `json:"nama_outlet"`
+		NomerInvoice   string `json:"nomer_invoice"`
+		CurrentAttempt int    `json:"current_attempt"`
+		NextAttempt    int    `json:"next_attempt"`
+		Status         string `json:"status"`
+	}
+	out := []previewRow{}
+	count2, count3 := 0, 0
+	for rows.Next() {
+		var p previewRow
+		var lastAt string
+		if err := rows.Scan(&p.Phone, &p.NamaOutlet, &p.NomerInvoice, &p.CurrentAttempt, &p.Status, &lastAt); err != nil {
+			continue
+		}
+		if attemptedToday(lastAt, startOfToday) {
+			continue
+		}
+		p.NextAttempt = p.CurrentAttempt + 1
+		switch p.NextAttempt {
+		case 2:
+			count2++
+		case 3:
+			count3++
+		}
+		out = append(out, p)
+	}
+	writeJSON(w, map[string]any{"rows": out, "count": len(out), "count2": count2, "count3": count3})
+}
+
+// zopozHandleRetryRunNow — trigger MANUAL: jalankan batch retry Zopoz sekarang (lewati
+// guard window-jam). ?attempt=2|3 wajib pilih salah satu attempt. ?limit=N opsional.
+func zopozHandleRetryRunNow(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	_, loggedIn, connected := zopozState.snapshot()
+	if !loggedIn || !connected {
+		httpErr(w, 400, "WhatsApp Zopoz belum terhubung — tidak ada yang dikirim.")
+		return
+	}
+	limit := 0
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	attempt := 0
+	if v := r.URL.Query().Get("attempt"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && (n == 2 || n == 3) {
+			attempt = n
+		} else {
+			httpErr(w, 400, "attempt harus 2 atau 3")
+			return
+		}
+	}
+	user, _ := userFromCtx(r.Context())
+	go zopozProcessRetries(true, limit, attempt, user.Email, user.Name)
+	log.Printf("zopoz retry: FORCE manual via API oleh %s (attempt=%d limit=%d)", user.Email, attempt, limit)
+	writeJSON(w, map[string]any{"ok": true, "started": true, "attempt": attempt, "limit": limit})
 }

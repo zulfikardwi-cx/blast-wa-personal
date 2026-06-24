@@ -80,6 +80,18 @@
   .att-1{background:#1f2937;color:#9aa7c7}
   .att-r{background:var(--teal-soft);color:var(--teal)}
   .att-mix{background:rgba(245,158,11,.15);color:var(--warn)}
+  .run-panel{display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin-bottom:10px}
+  .run-panel .lbl{font-size:12px;font-weight:600;color:var(--text);display:inline-flex;align-items:center;gap:6px}
+  .run-pair{display:inline-flex;align-items:center;gap:8px}
+  .chip{font-size:11px;padding:3px 9px;border-radius:999px;border:1px solid var(--line);background:var(--panel);color:var(--muted);white-space:nowrap}
+  .chip b{color:var(--lime);font-weight:700}
+  .chip.zero{opacity:.65}
+  .chip.zero b{color:var(--muted)}
+  .info-ic{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;border:1px solid var(--muted);color:var(--muted);font-size:10px;font-style:normal;font-weight:700;line-height:1;cursor:help}
+  .info-ic:hover{border-color:var(--teal);color:var(--teal)}
+  .tip{position:relative}
+  .tip::after{content:attr(data-tip);position:absolute;left:0;top:150%;width:320px;max-width:72vw;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:9px 11px;font-size:11px;font-weight:400;line-height:1.45;white-space:normal;z-index:60;opacity:0;visibility:hidden;transition:opacity .12s;box-shadow:0 6px 20px rgba(0,0,0,.45)}
+  .tip:hover::after{opacity:1;visibility:visible}
 </style>
 </head>
 <body>
@@ -170,6 +182,7 @@
     <div class="tab-row">
       <button class="tab pane-tab active" data-tab="progress">Progress</button>
       <button class="tab pane-tab" data-tab="history">Riwayat Blast Zopoz</button>
+      <button class="tab pane-tab" data-tab="report">Log Status Update</button>
     </div>
 
     <div class="tab-pane active" data-pane="progress">
@@ -196,6 +209,37 @@
       <div class="scroll"><table id="historyTable">
         <thead><tr>
           <th>Waktu</th><th>User</th><th>Attempt</th><th>Total</th><th>Sent</th><th>Failed</th><th>Durasi</th><th>Template</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table></div>
+    </div>
+
+    <div class="tab-pane" data-pane="report">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap">
+        <span style="color:var(--muted);font-size:12px">Log status per nomor Zopoz (After Blast + In Progress + Rejected). Attempt 1 gagal kirim → <b style="color:#fca5a5">Rejected</b>. Attempt 3 tanpa respons s/d 17:00 WIB → kolom <b style="color:#fca5a5">reject</b>. Keluar otomatis saat user balas / Done / Invalid.</span>
+        <span id="reportCount" style="font-size:12px;color:var(--muted)"></span>
+        <span style="flex:1"></span>
+        <span id="reportSheetStatus" style="font-size:12px;color:var(--muted)"></span>
+        <button id="reportCsvBtn" class="ghost">⬇️ Download CSV</button>
+        <button id="reportSheetBtn" style="display:none">📊 Export ke Google Sheet</button>
+        <button class="ghost" id="refreshReport">Refresh</button>
+      </div>
+      <div class="run-panel">
+        <span class="lbl">▶ Blast manual
+          <span class="info-ic tip" data-tip="'Eligible' = jumlah nomor yang BENAR-BENAR akan dikirim jika tombol ditekan sekarang. Sudah memperhitungkan aturan maks 1 attempt/hari per nomor: nomor yang sudah dikirimi attempt hari ini TIDAK dihitung. Nomor yang sudah membalas / Done / Invalid juga otomatis keluar. Jalankan Attempt 2 dulu, tunggu selesai, baru Attempt 3.">i</span>
+        </span>
+        <span class="run-pair">
+          <span class="chip zero" id="eligAtt2">Att 2: <b>–</b> eligible</span>
+          <button id="runAtt2Btn" title="Blast Attempt 2 Zopoz — hanya nomor yang attempt berikutnya = 2 (manual)">▶ Run Attempt 2</button>
+        </span>
+        <span class="run-pair">
+          <span class="chip zero" id="eligAtt3">Att 3: <b>–</b> eligible</span>
+          <button id="runAtt3Btn" title="Blast Attempt 3 Zopoz — hanya nomor yang attempt berikutnya = 3 (manual). Jalankan setelah Attempt 2.">▶ Run Attempt 3</button>
+        </span>
+      </div>
+      <div class="scroll"><table id="reportTable">
+        <thead><tr>
+          <th>Phone</th><th>Nama Outlet</th><th>Nomor Invoice</th><th>Status Attempt 1</th><th>Status Attempt 2</th><th>Status Attempt 3</th><th>Rejected</th><th>Info / Alasan</th>
         </tr></thead>
         <tbody></tbody>
       </table></div>
@@ -432,6 +476,7 @@ $$('.pane-tab').forEach(t => t.addEventListener('click', () => {
   t.classList.add('active');
   $(`[data-pane="${t.dataset.tab}"]`).classList.add('active');
   if (t.dataset.tab === 'history') loadHistory();
+  if (t.dataset.tab === 'report') loadReport();
 }));
 
 $('#refreshHistory').addEventListener('click', loadHistory);
@@ -510,6 +555,110 @@ async function loadHistory() {
     }
   } catch (e) {}
 }
+
+// ---- Log Status Update (Belum Response) Zopoz ----
+function attCell(v) {
+  let color = 'var(--muted)';
+  if (v === 'No Response') color = 'var(--warn)';
+  else if (v === 'Rejected') color = '#fca5a5';
+  return `<td style="text-align:center;color:${color}">${esc(v||'-')}</td>`;
+}
+function rejCell(v) {
+  if (v === 'reject') return `<td style="text-align:center;color:#fca5a5;font-weight:600">reject</td>`;
+  return `<td style="text-align:center;color:var(--muted)">-</td>`;
+}
+function setElig(id, n, count) {
+  const el = $('#' + id);
+  if (!el) return;
+  el.innerHTML = `Att ${n}: <b>${count}</b> eligible`;
+  el.classList.toggle('zero', count === 0);
+}
+
+async function loadReport() {
+  try {
+    const r = await apiFetch('/api/zopoz/report/unresponsive').then(r => r.json());
+    const tb = $('#reportTable tbody');
+    tb.innerHTML = '';
+    (r.rows || []).forEach(row => {
+      const tr = document.createElement('tr');
+      tr.className = 'history-row';
+      tr.innerHTML = `
+        <td>${esc(row.phone)}</td>
+        <td>${esc(row.nama_outlet)}</td>
+        <td>${esc(row.nomer_invoice)}</td>
+        ${attCell(row.attempt1)}${attCell(row.attempt2)}${attCell(row.attempt3)}${rejCell(row.rejected)}
+        <td style="color:var(--muted);font-size:11px">${esc(row.note||'')}</td>`;
+      tb.appendChild(tr);
+    });
+    const n = r.count || 0;
+    $('#reportCount').textContent = n + ' nomor';
+    if (!n) tb.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:20px">Belum ada data. 🎉</td></tr>';
+    try {
+      const pv = await apiFetch('/api/zopoz/retry/preview').then(r => r.json());
+      const c2 = pv.count2 || 0, c3 = pv.count3 || 0;
+      setElig('eligAtt2', 2, c2);
+      setElig('eligAtt3', 3, c3);
+      $('#runAtt2Btn').disabled = c2 === 0;
+      $('#runAtt3Btn').disabled = c3 === 0;
+    } catch (e) {}
+    $('#reportSheetBtn').style.display = (sheetCfg && sheetCfg.enabled) ? '' : 'none';
+    $('#reportSheetStatus').textContent = (sheetCfg && sheetCfg.enabled) ? '' : 'Sheets export belum aktif';
+  } catch (e) {}
+}
+$('#refreshReport').addEventListener('click', loadReport);
+
+async function runAttempt(n) {
+  let pv;
+  try { pv = await apiFetch('/api/zopoz/retry/preview').then(r => r.json()); }
+  catch (e) { alert('Gagal ambil daftar eligible: ' + e.message); return; }
+  const count = n === 2 ? (pv.count2 || 0) : (pv.count3 || 0);
+  if (!count) { alert(`Tidak ada nomor eligible untuk Attempt ${n}.\n\n(Sudah dikirim hari ini, sudah respons, atau belum sampai tahap Attempt ${n}.)`); return; }
+  const mins = Math.max(1, Math.ceil(count * 0.5));
+  if (!confirm(`Jalankan blast manual Attempt ${n} (Zopoz) ke ${count} nomor SEKARANG?\n\nHanya nomor yang attempt berikutnya = ${n}. Dikecualikan otomatis: sudah dikirim hari ini / sudah respons.\nJeda 20–40 detik antar nomor (± ${mins} menit total).`)) return;
+  const btn = n === 2 ? $('#runAtt2Btn') : $('#runAtt3Btn');
+  const old = btn.textContent;
+  btn.disabled = true; btn.textContent = '⏳ Mengirim...';
+  try {
+    const r = await apiFetch('/api/zopoz/retry/run-now?attempt=' + n, { method: 'POST' });
+    if (!r.ok) { alert('Gagal: ' + await r.text()); return; }
+    alert(`▶ Blast manual Attempt ${n} (Zopoz) dimulai untuk ${count} nomor.\nThread pindah ke Open saat customer membalas.${n === 2 ? '\n\nTunggu batch Attempt 2 selesai sebelum menjalankan Attempt 3.' : ''}`);
+  } finally {
+    setTimeout(() => { btn.disabled = false; btn.textContent = old; loadReport(); }, 8000);
+  }
+}
+$('#runAtt2Btn').addEventListener('click', () => runAttempt(2));
+$('#runAtt3Btn').addEventListener('click', () => runAttempt(3));
+
+$('#reportCsvBtn').addEventListener('click', async () => {
+  const btn = $('#reportCsvBtn');
+  const original = btn.textContent;
+  btn.disabled = true; btn.textContent = '⏳ ...';
+  try {
+    const r = await apiFetch('/api/zopoz/report/unresponsive.csv');
+    if (!r.ok) { alert('Download gagal: ' + await r.text()); return; }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'belum-respons-zopoz.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  } catch (e) { alert('Download error: ' + e.message); }
+  finally { btn.textContent = original; btn.disabled = false; }
+});
+
+$('#reportSheetBtn').addEventListener('click', async () => {
+  const btn = $('#reportSheetBtn');
+  const original = btn.textContent;
+  btn.disabled = true; btn.textContent = '⏳ Exporting...';
+  try {
+    const r = await apiFetch('/api/zopoz/report/export-sheet', { method: 'POST' });
+    if (!r.ok) { alert('Export gagal: ' + await r.text()); btn.textContent = original; btn.disabled = false; return; }
+    const d = await r.json();
+    btn.textContent = `✅ ${d.rows} baris → ${esc(d.sheet_name)}`;
+    setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 3000);
+    if (d.sheet_url) window.open(d.sheet_url, '_blank');
+  } catch (e) { alert('Export error: ' + e.message); btn.textContent = original; btn.disabled = false; }
+});
 
 async function pollUnread() {
   try {

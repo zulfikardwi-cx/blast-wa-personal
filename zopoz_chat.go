@@ -20,6 +20,8 @@ import (
 // initZopozChat — buat tabel zopoz_* di auditDB (DB yang sama, tabel terpisah → tidak
 // menyentuh chat_threads/chat_messages). Skema lengkap di awal (tak perlu migrasi runtime).
 func initZopozChat() error {
+	loadZopozTemplates()
+	loadZopozClosingTemplate()
 	_, err := auditDB.Exec(`
 CREATE TABLE IF NOT EXISTS zopoz_threads (
 	phone TEXT PRIMARY KEY,
@@ -278,7 +280,7 @@ func zopozHandleMessages(w http.ResponseWriter, r *http.Request) {
 		"assigned_name":    assignedName,
 		"followup_at":      followupAt,
 		"messages":         out,
-		"closing_template": renderClosingTemplate(nama),
+		"closing_template": zopozRenderClosingTemplate(nama),
 	})
 }
 
