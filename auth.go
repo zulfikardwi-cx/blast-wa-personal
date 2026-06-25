@@ -5,7 +5,6 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -88,10 +87,10 @@ func initAuth() error {
 	} else {
 		fmt.Println("OAuth Google: NONAKTIF (GOOGLE_* tidak lengkap) — login via email+password")
 	}
-	if oauthCfg == nil && appLoginPassword == "" {
-		return errors.New("tidak ada metode login aktif: set APP_LOGIN_PASSWORD, atau GOOGLE_* + OAUTH_REDIRECT_URL")
+	if oauthCfg == nil && len(appLoginEmails) == 0 {
+		return errors.New("tidak ada metode login aktif: set APP_LOGIN_EMAILS (roster user) atau GOOGLE_* + OAUTH_REDIRECT_URL")
 	}
-	fmt.Println("login: FRONTEND_URL =", frontendURL, "| ALLOWED_ORIGINS =", allowedOrigins, "| password-login =", appLoginPassword != "")
+	fmt.Println("login: FRONTEND_URL =", frontendURL, "| ALLOWED_ORIGINS =", allowedOrigins, "| user-roster =", len(appLoginEmails))
 	return nil
 }
 
@@ -230,10 +229,6 @@ func handlePasswordLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "POST only", http.StatusMethodNotAllowed)
 		return
 	}
-	if appLoginPassword == "" {
-		httpErr(w, 403, "Login password belum diaktifkan. Set APP_LOGIN_PASSWORD di .env lalu restart backend.")
-		return
-	}
 	if err := r.ParseMultipartForm(1 << 20); err != nil {
 		if err := r.ParseForm(); err != nil {
 			httpErr(w, 400, "form: %v", err)
@@ -242,43 +237,23 @@ func handlePasswordLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	email := strings.TrimSpace(strings.ToLower(r.FormValue("email")))
 	pass := r.FormValue("password")
-	name := strings.TrimSpace(r.FormValue("name"))
 	if email == "" || pass == "" {
 		httpErr(w, 400, "email & password wajib")
 		return
 	}
-	// constant-time compare biar tidak bocor lewat timing
-	if subtle.ConstantTimeCompare([]byte(pass), []byte(appLoginPassword)) != 1 {
-		time.Sleep(500 * time.Millisecond) // sedikit perlambat brute force
+	ok, _ := verifyUserPassword(email, pass)
+	if !ok {
+		time.Sleep(400 * time.Millisecond) // perlambat brute force
 		httpErr(w, 401, "Email atau password salah.")
 		return
 	}
-	if !emailAllowedForPasswordLogin(email) {
-		httpErr(w, 403, "Email tidak diizinkan untuk login.")
-		return
-	}
-	if name == "" {
-		name = email
-	}
-	user := SessionUser{Email: email, Name: name, IssuedAt: time.Now().Unix()}
+	user := SessionUser{Email: email, Name: nameFromEmail(email), IssuedAt: time.Now().Unix()}
 	if err := setSessionCookie(w, r, user); err != nil {
 		httpErr(w, 500, "set session: %v", err)
 		return
 	}
 	log.Println("login (password):", email)
 	writeJSON(w, map[string]any{"ok": true})
-}
-
-func emailAllowedForPasswordLogin(email string) bool {
-	if len(appLoginEmails) > 0 {
-		for _, e := range appLoginEmails {
-			if e == email {
-				return true
-			}
-		}
-		return false
-	}
-	return strings.HasSuffix(email, "@"+allowedDomain)
 }
 
 func handleAuthLogout(w http.ResponseWriter, r *http.Request) {

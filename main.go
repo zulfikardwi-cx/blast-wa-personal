@@ -47,6 +47,9 @@ func main() {
 	if err := initAudit(); err != nil {
 		log.Fatalf("audit: %v", err)
 	}
+	if err := initUsers(); err != nil {
+		log.Fatalf("users: %v", err)
+	}
 	if err := initSheets(); err != nil {
 		log.Fatalf("sheets: %v", err)
 	}
@@ -121,6 +124,7 @@ func main() {
 	mux.HandleFunc("/auth/callback", handleCallback)
 	mux.HandleFunc("/auth/logout", handleAuthLogout)
 	mux.HandleFunc("/auth/password-login", corsMiddleware(handlePasswordLogin))
+	mux.HandleFunc("/auth/change-password", corsMiddleware(requireAuth(handleChangePassword)))
 
 	// Serve frontend (docs/) SAME-ORIGIN dari backend. Cookie session jadi first-party
 	// -> jalan di semua browser. (Akses via GitHub Pages = beda domain -> cookie pihak
