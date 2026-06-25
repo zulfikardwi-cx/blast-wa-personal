@@ -61,6 +61,9 @@ func main() {
 		log.Fatalf("zopoz blast audit: %v", err)
 	}
 	initZopozSheetName()
+	if err := initExclusions(); err != nil {
+		log.Fatalf("exclusions: %v", err)
+	}
 	startRetryScheduler()
 	startZopozRetryScheduler()
 
@@ -139,6 +142,9 @@ func main() {
 	mux.HandleFunc("/api/templates", corsMiddleware(requireAuth(handleTemplates)))
 	mux.HandleFunc("/api/retry/preview", corsMiddleware(requireAuth(handleRetryPreview)))
 	mux.HandleFunc("/api/retry/run-now", corsMiddleware(requireAuth(handleRetryRunNow)))
+	mux.HandleFunc("/api/retry/exclude", corsMiddleware(requireAuth(handleRetryExclude)))
+	mux.HandleFunc("/api/retry/include", corsMiddleware(requireAuth(handleRetryInclude)))
+	mux.HandleFunc("/api/retry/excluded", corsMiddleware(requireAuth(handleRetryExcluded)))
 
 	// Report belum-respons (sudah di-blast 2/3x tapi nomor tidak pernah membalas)
 	mux.HandleFunc("/api/report/unresponsive", corsMiddleware(requireAuth(handleReportUnresponsive)))
@@ -169,6 +175,9 @@ func main() {
 	mux.HandleFunc("/api/zopoz/export-sheet", corsMiddleware(requireAuth(zopozHandleExportSheet)))
 	mux.HandleFunc("/api/zopoz/retry/preview", corsMiddleware(requireAuth(zopozHandleRetryPreview)))
 	mux.HandleFunc("/api/zopoz/retry/run-now", corsMiddleware(requireAuth(zopozHandleRetryRunNow)))
+	mux.HandleFunc("/api/zopoz/retry/exclude", corsMiddleware(requireAuth(zopozHandleRetryExclude)))
+	mux.HandleFunc("/api/zopoz/retry/include", corsMiddleware(requireAuth(zopozHandleRetryInclude)))
+	mux.HandleFunc("/api/zopoz/retry/excluded", corsMiddleware(requireAuth(zopozHandleRetryExcluded)))
 	mux.HandleFunc("/api/zopoz/report/unresponsive", corsMiddleware(requireAuth(zopozHandleReportUnresponsive)))
 	mux.HandleFunc("/api/zopoz/report/unresponsive.csv", corsMiddleware(requireAuth(zopozHandleReportUnresponsiveCSV)))
 	mux.HandleFunc("/api/zopoz/report/export-sheet", corsMiddleware(requireAuth(zopozHandleReportExportSheet)))

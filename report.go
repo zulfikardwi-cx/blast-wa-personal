@@ -72,6 +72,7 @@ JOIN blast_logs b ON r.blast_log_id = b.id
 JOIN chat_threads t ON t.phone = r.phone
 WHERE t.status IN ('after_blast', 'in_progress', 'rejected', 'force_close')
   AND COALESCE(r.nomer_invoice, '') != ''
+  AND NOT EXISTS (SELECT 1 FROM excluded_invoices x WHERE x.suite='majoo' AND x.phone=r.phone AND x.nomer_invoice=r.nomer_invoice)
 GROUP BY r.phone, r.nomer_invoice
 ORDER BY r.phone ASC, r.nomer_invoice ASC`)
 	if err != nil {

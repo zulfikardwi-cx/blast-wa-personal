@@ -120,7 +120,7 @@ func processRetries(force bool, limit, targetAttempt int, actorEmail, actorName 
 	// (status belum terminal: after_blast/open/in_progress/rejected — termasuk yang sudah
 	// membalas), tiap invoice progres attempt-nya sendiri dari log blast. Lihat
 	// collectInvoiceRetries di retry_invoice.go.
-	batch := collectInvoiceRetries("chat_threads", "blast_recipients", "blast_logs", targetAttempt, startOfToday)
+	batch := collectInvoiceRetries("majoo", "chat_threads", "blast_recipients", "blast_logs", targetAttempt, startOfToday)
 
 	if limit > 0 && len(batch) > limit {
 		batch = batch[:limit]
@@ -164,7 +164,7 @@ func processRetries(force bool, limit, targetAttempt int, actorEmail, actorName 
 	for i, r := range batch {
 		// Re-check sebelum send (race guard): nomor belum terminal & invoice ini belum
 		// dikirimi hari ini & attempt-nya masih < 3.
-		next, ok := invoiceStillNeedsRetry("chat_threads", "blast_recipients", "blast_logs", r.phone, r.nomerInvoice, startOfToday)
+		next, ok := invoiceStillNeedsRetry("majoo", "chat_threads", "blast_recipients", "blast_logs", r.phone, r.nomerInvoice, startOfToday)
 		if !ok {
 			continue
 		}
@@ -364,7 +364,7 @@ func handleRetryPreview(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().In(wibLoc)
 	startOfToday := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, wibLoc)
 	// Per-invoice: eligible = invoice (bukan nomor) yang siap dikirimi attempt berikutnya.
-	cands := collectInvoiceRetries("chat_threads", "blast_recipients", "blast_logs", 0, startOfToday)
+	cands := collectInvoiceRetries("majoo", "chat_threads", "blast_recipients", "blast_logs", 0, startOfToday)
 	type previewRow struct {
 		Phone        string `json:"phone"`
 		NamaOutlet   string `json:"nama_outlet"`

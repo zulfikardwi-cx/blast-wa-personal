@@ -408,7 +408,7 @@ func zopozProcessRetries(force bool, limit, targetAttempt int, actorEmail, actor
 	startOfToday := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, wibLoc)
 
 	// Kandidat retry PER NOMOR INVOICE (sama seperti majoo). Lihat collectInvoiceRetries.
-	batch := collectInvoiceRetries("zopoz_threads", "zopoz_blast_recipients", "zopoz_blast_logs", targetAttempt, startOfToday)
+	batch := collectInvoiceRetries("zopoz", "zopoz_threads", "zopoz_blast_recipients", "zopoz_blast_logs", targetAttempt, startOfToday)
 
 	if limit > 0 && len(batch) > limit {
 		batch = batch[:limit]
@@ -437,7 +437,7 @@ func zopozProcessRetries(force bool, limit, targetAttempt int, actorEmail, actor
 
 	sent, failed := 0, 0
 	for i, rr := range batch {
-		next, ok := invoiceStillNeedsRetry("zopoz_threads", "zopoz_blast_recipients", "zopoz_blast_logs", rr.phone, rr.nomerInvoice, startOfToday)
+		next, ok := invoiceStillNeedsRetry("zopoz", "zopoz_threads", "zopoz_blast_recipients", "zopoz_blast_logs", rr.phone, rr.nomerInvoice, startOfToday)
 		if !ok {
 			continue
 		}
@@ -578,7 +578,7 @@ func zopozSendRetryOne(phone, body string) error {
 func zopozHandleRetryPreview(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().In(wibLoc)
 	startOfToday := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, wibLoc)
-	cands := collectInvoiceRetries("zopoz_threads", "zopoz_blast_recipients", "zopoz_blast_logs", 0, startOfToday)
+	cands := collectInvoiceRetries("zopoz", "zopoz_threads", "zopoz_blast_recipients", "zopoz_blast_logs", 0, startOfToday)
 	type previewRow struct {
 		Phone        string `json:"phone"`
 		NamaOutlet   string `json:"nama_outlet"`

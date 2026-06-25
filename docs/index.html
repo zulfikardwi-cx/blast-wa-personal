@@ -101,6 +101,20 @@
   .att-1{background:#1f2937;color:#9aa7c7}
   .att-r{background:var(--teal-soft);color:var(--teal)}
   .att-mix{background:rgba(245,158,11,.15);color:var(--warn)}
+  #eligAtt2,#eligAtt3{cursor:pointer}
+  #eligAtt2:hover,#eligAtt3:hover{border-color:var(--teal)}
+  .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:300}
+  .modal-bg.show{display:flex}
+  .modal-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;width:720px;max-width:94vw;max-height:86vh;display:flex;flex-direction:column}
+  .modal-card .mh{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px}
+  .modal-card .mh h3{margin:0;font-size:15px}
+  .modal-card .mh .x{margin-left:auto;cursor:pointer;color:var(--muted);font-size:16px;background:none;border:0}
+  .modal-card .mb{padding:14px 18px;overflow:auto}
+  .sec-h{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin:4px 0 8px}
+  .ex-btn{font-size:11px;padding:4px 10px;border-radius:6px;border:1px solid rgba(239,68,68,.5);background:transparent;color:#fca5a5;cursor:pointer}
+  .ex-btn:hover{background:rgba(239,68,68,.12)}
+  .inc-btn{font-size:11px;padding:4px 10px;border-radius:6px;border:1px solid var(--line);background:transparent;color:var(--teal);cursor:pointer}
+  .inc-btn:hover{border-color:var(--teal)}
 </style>
 </head>
 <body>
@@ -253,6 +267,24 @@
     </div>
   </section>
 </main>
+
+<div class="modal-bg" id="eligModalBg">
+  <div class="modal-card">
+    <div class="mh"><h3 id="eligTitle">Detail Eligible</h3><button class="x" id="eligClose">✕</button></div>
+    <div class="mb">
+      <div class="sec-h">▶ Akan diblast (eligible) — <span id="eligCount">0</span> invoice</div>
+      <div class="scroll" style="max-height:280px"><table id="eligTable">
+        <thead><tr><th>Phone</th><th>Nama Outlet</th><th>Nomor Invoice</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+      <div class="sec-h" style="margin-top:16px">⛔ Di-exclude (tidak ikut blast & keluar dari Belum Respons) — <span id="exclCount">0</span></div>
+      <div class="scroll" style="max-height:220px"><table id="exclTable">
+        <thead><tr><th>Phone</th><th>Nomor Invoice</th><th>Oleh</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+    </div>
+  </div>
+</div>
 
 <script>
 const API_BASE = (window.APP_CONFIG && window.APP_CONFIG.API_BASE) || '';
@@ -662,6 +694,70 @@ async function runAttempt(n) {
 }
 $('#runAtt2Btn').addEventListener('click', () => runAttempt(2));
 $('#runAtt3Btn').addEventListener('click', () => runAttempt(3));
+
+// ---- Detail eligible + Exclude/Include per invoice ----
+const RETRY_BASE = '/api/retry';
+let eligModalAttempt = null;
+
+function openEligModal(att) {
+  eligModalAttempt = att;
+  $('#eligTitle').textContent = 'Detail Eligible — Attempt ' + att;
+  $('#eligModalBg').classList.add('show');
+  refreshEligModal();
+}
+function closeEligModal() { $('#eligModalBg').classList.remove('show'); }
+
+async function refreshEligModal() {
+  const att = eligModalAttempt;
+  let rows = [];
+  try {
+    const pv = await apiFetch(RETRY_BASE + '/preview').then(r => r.json());
+    rows = (pv.rows || []).filter(x => x.next_attempt === att);
+  } catch (e) {}
+  const tb = $('#eligTable tbody'); tb.innerHTML = '';
+  rows.forEach(x => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${esc(x.phone)}</td><td>${esc(x.nama_outlet||'')}</td><td>${esc(x.nomer_invoice)}</td>`
+      + `<td style="text-align:right"><button class="ex-btn">Exclude</button></td>`;
+    tr.querySelector('.ex-btn').addEventListener('click', () => doExclude(x.phone, x.nomer_invoice));
+    tb.appendChild(tr);
+  });
+  $('#eligCount').textContent = rows.length;
+  if (!rows.length) tb.innerHTML = '<tr><td colspan="4" style="color:var(--muted);text-align:center;padding:14px">Tidak ada invoice eligible untuk Attempt ' + att + '.</td></tr>';
+
+  let ex = [];
+  try { const r = await apiFetch(RETRY_BASE + '/excluded').then(r => r.json()); ex = r.rows || []; } catch (e) {}
+  const etb = $('#exclTable tbody'); etb.innerHTML = '';
+  ex.forEach(x => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${esc(x.phone)}</td><td>${esc(x.nomer_invoice)}</td><td style="color:var(--muted)">${esc(x.excluded_by||'')}</td>`
+      + `<td style="text-align:right"><button class="inc-btn">Include kembali</button></td>`;
+    tr.querySelector('.inc-btn').addEventListener('click', () => doInclude(x.phone, x.nomer_invoice));
+    etb.appendChild(tr);
+  });
+  $('#exclCount').textContent = ex.length;
+  if (!ex.length) etb.innerHTML = '<tr><td colspan="4" style="color:var(--muted);text-align:center;padding:10px">Belum ada yang di-exclude.</td></tr>';
+}
+
+async function doExclude(phone, inv) {
+  const fd = new FormData(); fd.append('phone', phone); fd.append('nomer_invoice', inv);
+  const r = await apiFetch(RETRY_BASE + '/exclude', { method: 'POST', body: fd });
+  if (!r.ok) { alert('Gagal exclude: ' + await r.text()); return; }
+  await refreshEligModal();
+  loadReport();
+}
+async function doInclude(phone, inv) {
+  const fd = new FormData(); fd.append('phone', phone); fd.append('nomer_invoice', inv);
+  const r = await apiFetch(RETRY_BASE + '/include', { method: 'POST', body: fd });
+  if (!r.ok) { alert('Gagal include: ' + await r.text()); return; }
+  await refreshEligModal();
+  loadReport();
+}
+
+$('#eligClose').addEventListener('click', closeEligModal);
+$('#eligModalBg').addEventListener('click', e => { if (e.target.id === 'eligModalBg') closeEligModal(); });
+$('#eligAtt2').addEventListener('click', () => openEligModal(2));
+$('#eligAtt3').addEventListener('click', () => openEligModal(3));
 
 $('#reportCsvBtn').addEventListener('click', async () => {
   const btn = $('#reportCsvBtn');

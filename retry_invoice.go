@@ -21,7 +21,7 @@ type invoiceRetry struct {
 	nextAttempt  int
 }
 
-func collectInvoiceRetries(threadsTbl, recvTbl, logsTbl string, targetAttempt int, startOfToday time.Time) []invoiceRetry {
+func collectInvoiceRetries(suite, threadsTbl, recvTbl, logsTbl string, targetAttempt int, startOfToday time.Time) []invoiceRetry {
 	q := `
 SELECT r.phone, COALESCE(r.nomer_invoice,''), COALESCE(MAX(r.nama_outlet),''),
        MAX(CASE WHEN r.status='sent' THEN b.attempt ELSE 0 END) AS max_att,
@@ -31,10 +31,11 @@ JOIN ` + logsTbl + ` b ON r.blast_log_id = b.id
 JOIN ` + threadsTbl + ` t ON t.phone = r.phone
 WHERE t.status NOT IN ('done','invalid','on_going','scheduled','force_close')
   AND COALESCE(r.nomer_invoice,'') != ''
+  AND NOT EXISTS (SELECT 1 FROM excluded_invoices x WHERE x.suite=? AND x.phone=r.phone AND x.nomer_invoice=r.nomer_invoice)
 GROUP BY r.phone, r.nomer_invoice
 HAVING max_att >= 1 AND max_att < 3
 ORDER BY max_att DESC, last_sent ASC`
-	rows, err := auditDB.Query(q)
+	rows, err := auditDB.Query(q, suite)
 	if err != nil {
 		return nil
 	}
@@ -60,7 +61,10 @@ ORDER BY max_att DESC, last_sent ASC`
 
 // invoiceStillNeedsRetry — re-check satu invoice tepat sebelum kirim (race guard). Return
 // (nextAttempt, true) kalau masih perlu dikirim; (0,false) kalau tidak.
-func invoiceStillNeedsRetry(threadsTbl, recvTbl, logsTbl, phone, invoice string, startOfToday time.Time) (int, bool) {
+func invoiceStillNeedsRetry(suite, threadsTbl, recvTbl, logsTbl, phone, invoice string, startOfToday time.Time) (int, bool) {
+	if isInvoiceExcluded(suite, phone, invoice) {
+		return 0, false
+	}
 	var status string
 	if err := auditDB.QueryRow(`SELECT status FROM `+threadsTbl+` WHERE phone=?`, phone).Scan(&status); err != nil {
 		return 0, false
