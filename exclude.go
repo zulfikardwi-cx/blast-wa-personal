@@ -35,9 +35,11 @@ func excludeInvoice(w http.ResponseWriter, r *http.Request, suite string) {
 		http.Error(w, "POST only", 405)
 		return
 	}
-	if err := r.ParseForm(); err != nil {
-		httpErr(w, 400, "form: %v", err)
-		return
+	if err := r.ParseMultipartForm(1 << 20); err != nil {
+		if err := r.ParseForm(); err != nil {
+			httpErr(w, 400, "form: %v", err)
+			return
+		}
 	}
 	phone := strings.TrimSpace(r.FormValue("phone"))
 	inv := strings.TrimSpace(r.FormValue("nomer_invoice"))
@@ -59,9 +61,11 @@ func includeInvoice(w http.ResponseWriter, r *http.Request, suite string) {
 		http.Error(w, "POST only", 405)
 		return
 	}
-	if err := r.ParseForm(); err != nil {
-		httpErr(w, 400, "form: %v", err)
-		return
+	if err := r.ParseMultipartForm(1 << 20); err != nil {
+		if err := r.ParseForm(); err != nil {
+			httpErr(w, 400, "form: %v", err)
+			return
+		}
 	}
 	phone := strings.TrimSpace(r.FormValue("phone"))
 	inv := strings.TrimSpace(r.FormValue("nomer_invoice"))
