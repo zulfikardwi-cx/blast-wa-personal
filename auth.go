@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -39,6 +40,12 @@ var sessionSecret []byte
 var frontendURL string
 var allowedOrigins []string
 
+// Login alternatif (non-OAuth): password bersama dari env APP_LOGIN_PASSWORD. Dipakai saat
+// OAuth tidak bisa (mis. domain baru tanpa akses Google Console). Email yang boleh masuk:
+// daftar APP_LOGIN_EMAILS (koma) kalau di-set, kalau kosong → wajib @majoo.id (sama OAuth).
+var appLoginPassword string
+var appLoginEmails []string
+
 func initAuth() error {
 	clientID := os.Getenv("GOOGLE_CLIENT_ID")
 	clientSecret := os.Getenv("GOOGLE_CLIENT_SECRET")
@@ -59,6 +66,14 @@ func initAuth() error {
 		o = strings.TrimSpace(strings.TrimRight(o, "/"))
 		if o != "" {
 			allowedOrigins = append(allowedOrigins, o)
+		}
+	}
+
+	appLoginPassword = os.Getenv("APP_LOGIN_PASSWORD")
+	for _, e := range strings.Split(os.Getenv("APP_LOGIN_EMAILS"), ",") {
+		e = strings.TrimSpace(strings.ToLower(e))
+		if e != "" {
+			appLoginEmails = append(appLoginEmails, e)
 		}
 	}
 
@@ -196,6 +211,64 @@ func handleCallback(w http.ResponseWriter, r *http.Request) {
 		dest = "/"
 	}
 	http.Redirect(w, r, dest, http.StatusFound)
+}
+
+// handlePasswordLogin — login non-OAuth (email + password bersama). Issue session yang
+// SAMA dengan OAuth sehingga semua endpoint & audit log (atas nama email) jalan normal.
+func handlePasswordLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	if appLoginPassword == "" {
+		httpErr(w, 403, "Login password belum diaktifkan. Set APP_LOGIN_PASSWORD di .env lalu restart backend.")
+		return
+	}
+	if err := r.ParseMultipartForm(1 << 20); err != nil {
+		if err := r.ParseForm(); err != nil {
+			httpErr(w, 400, "form: %v", err)
+			return
+		}
+	}
+	email := strings.TrimSpace(strings.ToLower(r.FormValue("email")))
+	pass := r.FormValue("password")
+	name := strings.TrimSpace(r.FormValue("name"))
+	if email == "" || pass == "" {
+		httpErr(w, 400, "email & password wajib")
+		return
+	}
+	// constant-time compare biar tidak bocor lewat timing
+	if subtle.ConstantTimeCompare([]byte(pass), []byte(appLoginPassword)) != 1 {
+		time.Sleep(500 * time.Millisecond) // sedikit perlambat brute force
+		httpErr(w, 401, "Email atau password salah.")
+		return
+	}
+	if !emailAllowedForPasswordLogin(email) {
+		httpErr(w, 403, "Email tidak diizinkan untuk login.")
+		return
+	}
+	if name == "" {
+		name = email
+	}
+	user := SessionUser{Email: email, Name: name, IssuedAt: time.Now().Unix()}
+	if err := setSessionCookie(w, r, user); err != nil {
+		httpErr(w, 500, "set session: %v", err)
+		return
+	}
+	log.Println("login (password):", email)
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+func emailAllowedForPasswordLogin(email string) bool {
+	if len(appLoginEmails) > 0 {
+		for _, e := range appLoginEmails {
+			if e == email {
+				return true
+			}
+		}
+		return false
+	}
+	return strings.HasSuffix(email, "@"+allowedDomain)
 }
 
 func handleAuthLogout(w http.ResponseWriter, r *http.Request) {

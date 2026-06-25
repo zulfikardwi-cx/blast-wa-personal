@@ -22,6 +22,12 @@
   .divider{height:1px;background:var(--line);margin:24px 0}
   .tagline{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
   .err{color:#fca5a5;font-size:12px;margin-top:12px;display:none}
+  .or{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin:22px 0 16px}
+  #pwForm{text-align:left}
+  #pwForm input{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:11px 12px;font-size:13px;margin-bottom:10px}
+  #pwForm input:focus{outline:none;border-color:var(--teal)}
+  .btn-login{width:100%;background:var(--teal);color:#0b1220;border:0;padding:12px;border-radius:8px;font-weight:600;font-size:14px;cursor:pointer}
+  .btn-login:hover{filter:brightness(1.05)}
 </style>
 </head>
 <body>
@@ -42,6 +48,12 @@
       </svg>
       Sign in with Google
     </a>
+    <div class="or">atau login dengan password</div>
+    <form id="pwForm">
+      <input type="email" id="pwEmail" placeholder="Email (@majoo.id)" autocomplete="username" />
+      <input type="password" id="pwPass" placeholder="Password" autocomplete="current-password" />
+      <button type="submit" class="btn-login">Masuk</button>
+    </form>
     <div class="domain">Hanya email <code>@majoo.id</code> yang diizinkan</div>
     <div class="err" id="err"></div>
   </div>
@@ -53,6 +65,21 @@ if (!API_BASE) {
   document.getElementById('err').textContent = 'API_BASE belum diset di config.js — hubungi admin.';
 }
 document.getElementById('loginBtn').href = API_BASE + '/auth/login';
+
+// Login email + password (alternatif non-OAuth)
+document.getElementById('pwForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errEl = document.getElementById('err');
+  errEl.style.display = 'none';
+  const fd = new FormData();
+  fd.append('email', document.getElementById('pwEmail').value.trim());
+  fd.append('password', document.getElementById('pwPass').value);
+  try {
+    const r = await fetch(API_BASE + '/auth/password-login', { method: 'POST', body: fd, credentials: 'include' });
+    if (!r.ok) { errEl.textContent = await r.text(); errEl.style.display = 'block'; return; }
+    location.href = 'index.html';
+  } catch (e) { errEl.textContent = 'Gagal konek ke backend.'; errEl.style.display = 'block'; }
+});
 
 // Auto-redirect kalau sudah login (cookie valid via cross-site)
 fetch(API_BASE + '/api/me', { credentials: 'include' })
