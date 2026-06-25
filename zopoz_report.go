@@ -23,43 +23,40 @@ func zopozReportSheetName() string {
 	return "Belum Respons Zopoz"
 }
 
+// zopozQueryUnresponsive — versi PER NOMOR INVOICE (identik logika majoo, lihat
+// queryUnresponsive di report.go). Sumber: zopoz_blast_recipients + zopoz_blast_logs,
+// filter belum-respons dari zopoz_threads. Reuse buildInvoiceRow agar logika sama persis.
 func zopozQueryUnresponsive() ([]UnresponsiveRow, error) {
 	rows, err := auditDB.Query(`
-SELECT phone, COALESCE(nama_outlet, ''), COALESCE(nomer_invoice, ''), current_attempt, status, COALESCE(attempt1_failed, 0), COALESCE(reject_reason, '')
-FROM zopoz_threads
-WHERE status IN ('after_blast', 'in_progress', 'rejected', 'force_close')
-ORDER BY current_attempt DESC, last_attempt_at ASC`)
+SELECT r.phone,
+       COALESCE(MAX(r.nama_outlet), ''),
+       r.nomer_invoice,
+       MAX(CASE WHEN b.attempt=1 AND r.status='sent'   THEN 1 ELSE 0 END) AS a1s,
+       MAX(CASE WHEN b.attempt=1 AND r.status='failed' THEN 1 ELSE 0 END) AS a1f,
+       MAX(CASE WHEN b.attempt=2 AND r.status='sent'   THEN 1 ELSE 0 END) AS a2s,
+       MAX(CASE WHEN b.attempt=3 AND r.status='sent'   THEN 1 ELSE 0 END) AS a3s,
+       COALESCE(MAX(CASE WHEN b.attempt=1 AND r.status='failed' THEN r.error END), '') AS a1err,
+       t.status,
+       COALESCE(t.reject_reason, '')
+FROM zopoz_blast_recipients r
+JOIN zopoz_blast_logs b ON r.blast_log_id = b.id
+JOIN zopoz_threads t ON t.phone = r.phone
+WHERE t.status IN ('after_blast', 'in_progress', 'rejected', 'force_close')
+  AND COALESCE(r.nomer_invoice, '') != ''
+GROUP BY r.phone, r.nomer_invoice
+ORDER BY r.phone ASC, r.nomer_invoice ASC`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := []UnresponsiveRow{}
 	for rows.Next() {
-		var phone, outlet, inv, status, reason string
-		var cur, att1Failed int
-		if err := rows.Scan(&phone, &outlet, &inv, &cur, &status, &att1Failed, &reason); err != nil {
+		var phone, outlet, inv, a1err, threadStatus, reason string
+		var a1s, a1f, a2s, a3s int
+		if err := rows.Scan(&phone, &outlet, &inv, &a1s, &a1f, &a2s, &a3s, &a1err, &threadStatus, &reason); err != nil {
 			return nil, err
 		}
-		att1 := attStatus(1, cur)
-		if att1Failed == 1 {
-			att1 = "Rejected"
-		}
-		rejected := "-"
-		note := ""
-		if status == "rejected" || status == "force_close" {
-			rejected = "reject"
-			note = reason
-		}
-		out = append(out, UnresponsiveRow{
-			Phone:        phone,
-			NamaOutlet:   outlet,
-			NomerInvoice: inv,
-			Attempt1:     att1,
-			Attempt2:     attStatus(2, cur),
-			Attempt3:     attStatus(3, cur),
-			Rejected:     rejected,
-			Note:         note,
-		})
+		out = append(out, buildInvoiceRow(phone, outlet, inv, a1s, a1f, a2s, a3s, a1err, threadStatus, reason))
 	}
 	return out, rows.Err()
 }

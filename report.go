@@ -42,52 +42,93 @@ func attStatus(n, current int) string {
 	return "-"
 }
 
-// queryUnresponsive — Log Status Update: bucket After Blast + In Progress (belum
-// direspons) PLUS rejected (Attempt 1 gagal kirim) PLUS force_close (Attempt 3 tanpa
-// respons). after_blast/in_progress keluar saat user balas (→ open) / done / invalid.
-// rejected & force_close SENGAJA tetap tampil & tertagging reject — data ini ditarik
-// untuk diproses reject di sistem lain (jangan dihilangkan dari sini).
+// queryUnresponsive — Log Status Update, PER NOMOR INVOICE (bukan per-nomor telepon).
+// Satu nomor telepon bisa di-blast untuk banyak invoice; chat_threads (key = phone) hanya
+// menyimpan invoice TERAKHIR, jadi report lama kehilangan invoice-invoice sebelumnya.
+// Di sini sumbernya blast_recipients + blast_logs (punya kolom invoice & attempt per kirim),
+// jadi tiap invoice tampil sebagai baris sendiri dengan progres attempt-nya masing-masing.
+//
+// Filter "Belum Respons" TETAP per-nomor (chat_threads.status ∈ after_blast/in_progress/
+// rejected/force_close) — begitu nomor membalas/Done/Invalid, SEMUA invoice nomor itu keluar
+// (balasan WA tidak terikat ke invoice tertentu). Logika kolom tidak berubah maknanya:
+//   - Attempt N: "No Response" kalau attempt N invoice itu terkirim, "-" kalau belum,
+//     "Rejected" untuk Attempt 1 yang GAGAL kirim.
+//   - Rejected: "reject" bila Attempt 1 invoice gagal kirim, ATAU invoice sudah sampai
+//     Attempt 3 dan nomornya ber-status force_close (tidak respons s/d jam cutoff).
 func queryUnresponsive() ([]UnresponsiveRow, error) {
 	rows, err := auditDB.Query(`
-SELECT phone, COALESCE(nama_outlet, ''), COALESCE(nomer_invoice, ''), current_attempt, status, COALESCE(attempt1_failed, 0), COALESCE(reject_reason, '')
-FROM chat_threads
-WHERE status IN ('after_blast', 'in_progress', 'rejected', 'force_close')
-ORDER BY current_attempt DESC, last_attempt_at ASC`)
+SELECT r.phone,
+       COALESCE(MAX(r.nama_outlet), ''),
+       r.nomer_invoice,
+       MAX(CASE WHEN b.attempt=1 AND r.status='sent'   THEN 1 ELSE 0 END) AS a1s,
+       MAX(CASE WHEN b.attempt=1 AND r.status='failed' THEN 1 ELSE 0 END) AS a1f,
+       MAX(CASE WHEN b.attempt=2 AND r.status='sent'   THEN 1 ELSE 0 END) AS a2s,
+       MAX(CASE WHEN b.attempt=3 AND r.status='sent'   THEN 1 ELSE 0 END) AS a3s,
+       COALESCE(MAX(CASE WHEN b.attempt=1 AND r.status='failed' THEN r.error END), '') AS a1err,
+       t.status,
+       COALESCE(t.reject_reason, '')
+FROM blast_recipients r
+JOIN blast_logs b ON r.blast_log_id = b.id
+JOIN chat_threads t ON t.phone = r.phone
+WHERE t.status IN ('after_blast', 'in_progress', 'rejected', 'force_close')
+  AND COALESCE(r.nomer_invoice, '') != ''
+GROUP BY r.phone, r.nomer_invoice
+ORDER BY r.phone ASC, r.nomer_invoice ASC`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := []UnresponsiveRow{}
 	for rows.Next() {
-		var phone, outlet, inv, status, reason string
-		var cur, att1Failed int
-		if err := rows.Scan(&phone, &outlet, &inv, &cur, &status, &att1Failed, &reason); err != nil {
+		var phone, outlet, inv, a1err, threadStatus, reason string
+		var a1s, a1f, a2s, a3s int
+		if err := rows.Scan(&phone, &outlet, &inv, &a1s, &a1f, &a2s, &a3s, &a1err, &threadStatus, &reason); err != nil {
 			return nil, err
 		}
-		// Attempt 1 gagal kirim → sel Attempt 1 = "Rejected" (bukan No Response).
-		att1 := attStatus(1, cur)
-		if att1Failed == 1 {
-			att1 = "Rejected"
-		}
-		// rejected (gagal Attempt 1) & force_close (Attempt 3 no-response) → tertagging reject.
-		rejected := "-"
-		note := ""
-		if status == "rejected" || status == "force_close" {
-			rejected = "reject"
-			note = reason // alasan: nomor tidak terdaftar / tidak respons s/d 17:00, dll
-		}
-		out = append(out, UnresponsiveRow{
-			Phone:        phone,
-			NamaOutlet:   outlet,
-			NomerInvoice: inv,
-			Attempt1:     att1,
-			Attempt2:     attStatus(2, cur),
-			Attempt3:     attStatus(3, cur),
-			Rejected:     rejected,
-			Note:         note,
-		})
+		out = append(out, buildInvoiceRow(phone, outlet, inv, a1s, a1f, a2s, a3s, a1err, threadStatus, reason))
 	}
 	return out, rows.Err()
+}
+
+// buildInvoiceRow — susun UnresponsiveRow per-invoice dari agregat blast log (dipakai
+// majoo & Zopoz supaya logikanya identik). Lihat queryUnresponsive untuk aturan kolom.
+func buildInvoiceRow(phone, outlet, inv string, a1s, a1f, a2s, a3s int, a1err, threadStatus, reason string) UnresponsiveRow {
+	att1 := "-"
+	if a1f == 1 {
+		att1 = "Rejected"
+	} else if a1s == 1 {
+		att1 = "No Response"
+	}
+	att2 := "-"
+	if a2s == 1 {
+		att2 = "No Response"
+	}
+	att3 := "-"
+	if a3s == 1 {
+		att3 = "No Response"
+	}
+	rejected := "-"
+	note := ""
+	if a1f == 1 {
+		rejected = "reject"
+		note = a1err
+		if note == "" {
+			note = "Gagal kirim Attempt 1"
+		}
+	} else if a3s == 1 && threadStatus == "force_close" {
+		rejected = "reject"
+		note = reason
+	}
+	return UnresponsiveRow{
+		Phone:        phone,
+		NamaOutlet:   outlet,
+		NomerInvoice: inv,
+		Attempt1:     att1,
+		Attempt2:     att2,
+		Attempt3:     att3,
+		Rejected:     rejected,
+		Note:         note,
+	}
 }
 
 // handleReportUnresponsive — JSON list untuk render tabel di UI.
