@@ -54,9 +54,6 @@ func initAuth() error {
 	frontendURL = strings.TrimRight(os.Getenv("FRONTEND_URL"), "/")
 	ao := os.Getenv("ALLOWED_ORIGINS")
 
-	if clientID == "" || clientSecret == "" || redirect == "" {
-		return errors.New("GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, OAUTH_REDIRECT_URL wajib di-set")
-	}
 	if secret == "" {
 		return errors.New("SESSION_SECRET wajib di-set (generate: openssl rand -hex 32)")
 	}
@@ -77,19 +74,24 @@ func initAuth() error {
 		}
 	}
 
-	oauthCfg = &oauth2.Config{
-		ClientID:     clientID,
-		ClientSecret: clientSecret,
-		RedirectURL:  redirect,
-		Scopes:       []string{"openid", "email", "profile"},
-		Endpoint:     google.Endpoint,
+	// OAuth Google OPSIONAL — aktif hanya kalau GOOGLE_* + OAUTH_REDIRECT_URL lengkap.
+	// Kalau tidak, login murni via email+password (APP_LOGIN_PASSWORD).
+	if clientID != "" && clientSecret != "" && redirect != "" {
+		oauthCfg = &oauth2.Config{
+			ClientID:     clientID,
+			ClientSecret: clientSecret,
+			RedirectURL:  redirect,
+			Scopes:       []string{"openid", "email", "profile"},
+			Endpoint:     google.Endpoint,
+		}
+		fmt.Println("OAuth Google: AKTIF — redirect", redirect)
+	} else {
+		fmt.Println("OAuth Google: NONAKTIF (GOOGLE_* tidak lengkap) — login via email+password")
 	}
-	fmt.Println("=== OAUTH CONFIG ===")
-	fmt.Println("  CLIENT_ID:", clientID[:20]+"..."+clientID[len(clientID)-30:])
-	fmt.Println("  REDIRECT_URL:", redirect)
-	fmt.Println("  FRONTEND_URL:", frontendURL)
-	fmt.Println("  ALLOWED_ORIGINS:", allowedOrigins)
-	fmt.Println("====================")
+	if oauthCfg == nil && appLoginPassword == "" {
+		return errors.New("tidak ada metode login aktif: set APP_LOGIN_PASSWORD, atau GOOGLE_* + OAUTH_REDIRECT_URL")
+	}
+	fmt.Println("login: FRONTEND_URL =", frontendURL, "| ALLOWED_ORIGINS =", allowedOrigins, "| password-login =", appLoginPassword != "")
 	return nil
 }
 
@@ -124,6 +126,10 @@ func corsMiddleware(h http.HandlerFunc) http.HandlerFunc {
 }
 
 func handleLogin(w http.ResponseWriter, r *http.Request) {
+	if oauthCfg == nil {
+		http.Error(w, "Login Google dinonaktifkan. Gunakan login email + password.", http.StatusNotFound)
+		return
+	}
 	stateBytes := make([]byte, 16)
 	_, _ = rand.Read(stateBytes)
 	state := hex.EncodeToString(stateBytes)
@@ -143,6 +149,10 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleCallback(w http.ResponseWriter, r *http.Request) {
+	if oauthCfg == nil {
+		renderAuthError(w, "Login Google dinonaktifkan. Gunakan login email + password.")
+		return
+	}
 	q := r.URL.Query()
 	if errParam := q.Get("error"); errParam != "" {
 		renderAuthError(w, "Login dibatalkan: "+errParam)
