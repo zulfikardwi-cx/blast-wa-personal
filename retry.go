@@ -116,44 +116,11 @@ func processRetries(force bool, limit, targetAttempt int, actorEmail, actorName 
 	// ini (WIB). startOfToday = 00:00 WIB hari ini.
 	startOfToday := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, wibLoc)
 
-	// List "Belum Respons" = after_blast + in_progress (sama persis dgn report.go).
-	// Begitu user balas → status pindah ke 'open' → otomatis keluar antrian.
-	q := `
-SELECT phone, COALESCE(nama_outlet, ''), COALESCE(nomer_invoice, ''), current_attempt, COALESCE(last_attempt_at, '')
-FROM chat_threads
-WHERE status IN ('after_blast', 'in_progress')
-  AND current_attempt < 3`
-	var qargs []any
-	if targetAttempt == 2 || targetAttempt == 3 {
-		// hanya thread yang attempt BERIKUTNYA == targetAttempt
-		q += ` AND current_attempt = ?`
-		qargs = append(qargs, targetAttempt-1)
-	}
-	q += ` ORDER BY current_attempt DESC, last_attempt_at ASC`
-
-	rows, err := auditDB.Query(q, qargs...)
-	if err != nil {
-		log.Printf("retry: query error: %v", err)
-		return
-	}
-
-	type retryRow struct {
-		phone, namaOutlet, nomerInvoice string
-		currentAttempt                  int
-	}
-	var batch []retryRow
-	for rows.Next() {
-		var r retryRow
-		var lastAt string
-		if err := rows.Scan(&r.phone, &r.namaOutlet, &r.nomerInvoice, &r.currentAttempt, &lastAt); err != nil {
-			continue
-		}
-		if attemptedToday(lastAt, startOfToday) {
-			continue // sudah dikirimi attempt hari ini, skip
-		}
-		batch = append(batch, r)
-	}
-	rows.Close()
+	// Kandidat retry PER NOMOR INVOICE (bukan per-nomor telepon). Nomor masih aktif
+	// (status belum terminal: after_blast/open/in_progress/rejected — termasuk yang sudah
+	// membalas), tiap invoice progres attempt-nya sendiri dari log blast. Lihat
+	// collectInvoiceRetries di retry_invoice.go.
+	batch := collectInvoiceRetries("chat_threads", "blast_recipients", "blast_logs", targetAttempt, startOfToday)
 
 	if limit > 0 && len(batch) > limit {
 		batch = batch[:limit]
@@ -170,7 +137,7 @@ WHERE status IN ('after_blast', 'in_progress')
 	if targetAttempt == 2 || targetAttempt == 3 {
 		mode += fmt.Sprintf(" Attempt %d", targetAttempt)
 	}
-	log.Printf("retry: %s — antrikan %d threads (after_blast + in_progress)", mode, len(batch))
+	log.Printf("retry: %s — antrikan %d invoice (per-invoice, nomor belum terminal)", mode, len(batch))
 
 	// Catat batch ini ke Riwayat Blast (blast_logs + blast_recipients) untuk report &
 	// monitoring — attempt 2/3 yang benar-benar terkirim ikut tercatat seperti attempt 1.
@@ -195,39 +162,32 @@ WHERE status IN ('after_blast', 'in_progress')
 
 	sent, failed := 0, 0
 	for i, r := range batch {
-		// Re-check sebelum send — kalau user balas (→ open) atau sudah dikirimi hari ini
-		// (run lain) antara query dan send, skip.
-		if !stillNeedsRetry(r.phone, startOfToday) {
+		// Re-check sebelum send (race guard): nomor belum terminal & invoice ini belum
+		// dikirimi hari ini & attempt-nya masih < 3.
+		next, ok := invoiceStillNeedsRetry("chat_threads", "blast_recipients", "blast_logs", r.phone, r.nomerInvoice, startOfToday)
+		if !ok {
 			continue
 		}
 
-		nextAttempt := r.currentAttempt + 1
-		template := GetAttemptTemplate(nextAttempt)
+		template := GetAttemptTemplate(next)
 		body := renderTemplateWithVars(template, r.namaOutlet, r.nomerInvoice)
 
 		if err := sendRetryOne(r.phone, body); err != nil {
-			log.Printf("retry: phone=%s attempt=%d FAILED: %v", r.phone, nextAttempt, err)
+			log.Printf("retry: phone=%s inv=%s attempt=%d FAILED: %v", r.phone, r.nomerInvoice, next, err)
 			failed++
 			_ = recordRetryRecipient(retryLogID, r.phone, r.namaOutlet, r.nomerInvoice, "failed", err.Error(), body, time.Now())
 			continue
 		}
 
 		now := time.Now()
-		if err := upsertThreadRetry(r.phone, body, nextAttempt, now); err != nil {
-			log.Printf("retry: upsertThreadRetry error: %v", err)
+		if err := bumpThreadAfterRetry("chat_threads", r.phone, body, next, now); err != nil {
+			log.Printf("retry: bumpThreadAfterRetry error: %v", err)
 		}
-		if err := recordChatMessage(r.phone, "out", body, "", "", now, 0, "system@retry", fmt.Sprintf("Auto Attempt %d", nextAttempt)); err != nil {
+		if err := recordChatMessage(r.phone, "out", body, "", "", now, 0, "system@retry", fmt.Sprintf("Auto Attempt %d", next)); err != nil {
 			log.Printf("retry: recordChatMessage error: %v", err)
 		}
 		_ = recordRetryRecipient(retryLogID, r.phone, r.namaOutlet, r.nomerInvoice, "sent", "", body, now)
-
-		log.Printf("retry: phone=%s attempt %d sent", r.phone, nextAttempt)
-		if nextAttempt >= 3 {
-			// Attempt 3 (terakhir) terkirim. JANGAN langsung close — beri tenggang sampai
-			// jam force-close (17:00 WIB) hari ini. processForceCloseSweep yang akan memindah
-			// ke 'force_close' kalau tetap tidak tuntas. Kalau customer balas dulu → 'open'.
-			log.Printf("retry: phone=%s attempt 3 terkirim → tunggu respons s/d %02d:00 WIB (force-close-sweep)", r.phone, forceCloseHour)
-		}
+		log.Printf("retry: phone=%s inv=%s attempt %d sent", r.phone, r.nomerInvoice, next)
 		sent++
 
 		// Jitter delay antara send (kecuali yang terakhir)
@@ -284,6 +244,11 @@ WHERE status IN ('after_blast', 'in_progress') AND current_attempt >= 3`)
 	closed := 0
 	for _, r := range batch {
 		if r.lastAt == "" {
+			continue
+		}
+		// Per-invoice: jangan tutup nomor selagi masih ada invoice yang belum tuntas
+		// attempt-nya (mis. invoice lain baru attempt 1). Tunggu semua invoice sampai 3.
+		if phoneHasPendingInvoice("blast_recipients", "blast_logs", r.phone) {
 			continue
 		}
 		t3, err := time.Parse(time.RFC3339, r.lastAt)
@@ -398,45 +363,25 @@ func atoiEnv(key string, def int) int {
 func handleRetryPreview(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().In(wibLoc)
 	startOfToday := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, wibLoc)
-	rows, err := auditDB.Query(`
-SELECT phone, COALESCE(nama_outlet,''), COALESCE(nomer_invoice,''), current_attempt, status, COALESCE(last_attempt_at,'')
-FROM chat_threads
-WHERE status IN ('after_blast','in_progress') AND current_attempt < 3
-ORDER BY current_attempt DESC, last_attempt_at ASC`)
-	if err != nil {
-		httpErr(w, 500, "query: %v", err)
-		return
-	}
-	defer rows.Close()
+	// Per-invoice: eligible = invoice (bukan nomor) yang siap dikirimi attempt berikutnya.
+	cands := collectInvoiceRetries("chat_threads", "blast_recipients", "blast_logs", 0, startOfToday)
 	type previewRow struct {
-		Phone          string `json:"phone"`
-		NamaOutlet     string `json:"nama_outlet"`
-		NomerInvoice   string `json:"nomer_invoice"`
-		CurrentAttempt int    `json:"current_attempt"`
-		NextAttempt    int    `json:"next_attempt"`
-		Status         string `json:"status"`
+		Phone        string `json:"phone"`
+		NamaOutlet   string `json:"nama_outlet"`
+		NomerInvoice string `json:"nomer_invoice"`
+		NextAttempt  int    `json:"next_attempt"`
 	}
 	out := []previewRow{}
 	count2, count3 := 0, 0
-	for rows.Next() {
-		var p previewRow
-		var lastAt string
-		if err := rows.Scan(&p.Phone, &p.NamaOutlet, &p.NomerInvoice, &p.CurrentAttempt, &p.Status, &lastAt); err != nil {
-			continue
-		}
-		if attemptedToday(lastAt, startOfToday) {
-			continue
-		}
-		p.NextAttempt = p.CurrentAttempt + 1
-		switch p.NextAttempt {
+	for _, c := range cands {
+		switch c.nextAttempt {
 		case 2:
 			count2++
 		case 3:
 			count3++
 		}
-		out = append(out, p)
+		out = append(out, previewRow{c.phone, c.namaOutlet, c.nomerInvoice, c.nextAttempt})
 	}
-	// count = total (kompat lama); count2/count3 = eligible per attempt utk 2 tombol terpisah
 	writeJSON(w, map[string]any{"rows": out, "count": len(out), "count2": count2, "count3": count3})
 }
 

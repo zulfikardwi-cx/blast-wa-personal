@@ -407,40 +407,8 @@ func zopozProcessRetries(force bool, limit, targetAttempt int, actorEmail, actor
 
 	startOfToday := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, wibLoc)
 
-	q := `
-SELECT phone, COALESCE(nama_outlet, ''), COALESCE(nomer_invoice, ''), current_attempt, COALESCE(last_attempt_at, '')
-FROM zopoz_threads
-WHERE status IN ('after_blast', 'in_progress')
-  AND current_attempt < 3`
-	var qargs []any
-	if targetAttempt == 2 || targetAttempt == 3 {
-		q += ` AND current_attempt = ?`
-		qargs = append(qargs, targetAttempt-1)
-	}
-	q += ` ORDER BY current_attempt DESC, last_attempt_at ASC`
-
-	rows, err := auditDB.Query(q, qargs...)
-	if err != nil {
-		log.Printf("zopoz retry: query error: %v", err)
-		return
-	}
-	type retryRow struct {
-		phone, namaOutlet, nomerInvoice string
-		currentAttempt                  int
-	}
-	var batch []retryRow
-	for rows.Next() {
-		var rr retryRow
-		var lastAt string
-		if err := rows.Scan(&rr.phone, &rr.namaOutlet, &rr.nomerInvoice, &rr.currentAttempt, &lastAt); err != nil {
-			continue
-		}
-		if attemptedToday(lastAt, startOfToday) {
-			continue
-		}
-		batch = append(batch, rr)
-	}
-	rows.Close()
+	// Kandidat retry PER NOMOR INVOICE (sama seperti majoo). Lihat collectInvoiceRetries.
+	batch := collectInvoiceRetries("zopoz_threads", "zopoz_blast_recipients", "zopoz_blast_logs", targetAttempt, startOfToday)
 
 	if limit > 0 && len(batch) > limit {
 		batch = batch[:limit]
@@ -449,7 +417,7 @@ WHERE status IN ('after_blast', 'in_progress')
 		return
 	}
 
-	log.Printf("zopoz retry: antrikan %d threads (attempt target=%d force=%v)", len(batch), targetAttempt, force)
+	log.Printf("zopoz retry: antrikan %d invoice (per-invoice, target=%d force=%v)", len(batch), targetAttempt, force)
 
 	batchStart := time.Now()
 	auditEmail := actorEmail
@@ -469,29 +437,29 @@ WHERE status IN ('after_blast', 'in_progress')
 
 	sent, failed := 0, 0
 	for i, rr := range batch {
-		if !zopozStillNeedsRetry(rr.phone, startOfToday) {
+		next, ok := invoiceStillNeedsRetry("zopoz_threads", "zopoz_blast_recipients", "zopoz_blast_logs", rr.phone, rr.nomerInvoice, startOfToday)
+		if !ok {
 			continue
 		}
-		nextAttempt := rr.currentAttempt + 1
-		template := zopozGetAttemptTemplate(nextAttempt)
+		template := zopozGetAttemptTemplate(next)
 		body := renderTemplateWithVars(template, rr.namaOutlet, rr.nomerInvoice)
 
 		if err := zopozSendRetryOne(rr.phone, body); err != nil {
-			log.Printf("zopoz retry: phone=%s attempt=%d FAILED: %v", rr.phone, nextAttempt, err)
+			log.Printf("zopoz retry: phone=%s inv=%s attempt=%d FAILED: %v", rr.phone, rr.nomerInvoice, next, err)
 			failed++
 			_ = zopozRecordRetryRecipient(retryLogID, rr.phone, rr.namaOutlet, rr.nomerInvoice, "failed", err.Error(), body, time.Now())
 			continue
 		}
 
 		now := time.Now()
-		if err := zopozUpsertThreadRetry(rr.phone, body, nextAttempt, now); err != nil {
-			log.Printf("zopoz retry: upsertThreadRetry error: %v", err)
+		if err := bumpThreadAfterRetry("zopoz_threads", rr.phone, body, next, now); err != nil {
+			log.Printf("zopoz retry: bumpThreadAfterRetry error: %v", err)
 		}
-		if err := zopozRecordChatMessage(rr.phone, "out", body, "", "", now, 0, "system@retry", fmt.Sprintf("Auto Attempt %d", nextAttempt)); err != nil {
+		if err := zopozRecordChatMessage(rr.phone, "out", body, "", "", now, 0, "system@retry", fmt.Sprintf("Auto Attempt %d", next)); err != nil {
 			log.Printf("zopoz retry: recordChatMessage error: %v", err)
 		}
 		_ = zopozRecordRetryRecipient(retryLogID, rr.phone, rr.namaOutlet, rr.nomerInvoice, "sent", "", body, now)
-		log.Printf("zopoz retry: phone=%s attempt %d sent", rr.phone, nextAttempt)
+		log.Printf("zopoz retry: phone=%s inv=%s attempt %d sent", rr.phone, rr.nomerInvoice, next)
 		sent++
 
 		if i < len(batch)-1 {
@@ -537,6 +505,10 @@ WHERE status IN ('after_blast', 'in_progress') AND current_attempt >= 3`)
 	closed := 0
 	for _, rr := range batch {
 		if rr.lastAt == "" {
+			continue
+		}
+		// Per-invoice: jangan tutup nomor selagi ada invoice yang belum tuntas attempt-nya.
+		if phoneHasPendingInvoice("zopoz_blast_recipients", "zopoz_blast_logs", rr.phone) {
 			continue
 		}
 		t3, err := time.Parse(time.RFC3339, rr.lastAt)
@@ -606,43 +578,23 @@ func zopozSendRetryOne(phone, body string) error {
 func zopozHandleRetryPreview(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().In(wibLoc)
 	startOfToday := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, wibLoc)
-	rows, err := auditDB.Query(`
-SELECT phone, COALESCE(nama_outlet,''), COALESCE(nomer_invoice,''), current_attempt, status, COALESCE(last_attempt_at,'')
-FROM zopoz_threads
-WHERE status IN ('after_blast','in_progress') AND current_attempt < 3
-ORDER BY current_attempt DESC, last_attempt_at ASC`)
-	if err != nil {
-		httpErr(w, 500, "query: %v", err)
-		return
-	}
-	defer rows.Close()
+	cands := collectInvoiceRetries("zopoz_threads", "zopoz_blast_recipients", "zopoz_blast_logs", 0, startOfToday)
 	type previewRow struct {
-		Phone          string `json:"phone"`
-		NamaOutlet     string `json:"nama_outlet"`
-		NomerInvoice   string `json:"nomer_invoice"`
-		CurrentAttempt int    `json:"current_attempt"`
-		NextAttempt    int    `json:"next_attempt"`
-		Status         string `json:"status"`
+		Phone        string `json:"phone"`
+		NamaOutlet   string `json:"nama_outlet"`
+		NomerInvoice string `json:"nomer_invoice"`
+		NextAttempt  int    `json:"next_attempt"`
 	}
 	out := []previewRow{}
 	count2, count3 := 0, 0
-	for rows.Next() {
-		var p previewRow
-		var lastAt string
-		if err := rows.Scan(&p.Phone, &p.NamaOutlet, &p.NomerInvoice, &p.CurrentAttempt, &p.Status, &lastAt); err != nil {
-			continue
-		}
-		if attemptedToday(lastAt, startOfToday) {
-			continue
-		}
-		p.NextAttempt = p.CurrentAttempt + 1
-		switch p.NextAttempt {
+	for _, c := range cands {
+		switch c.nextAttempt {
 		case 2:
 			count2++
 		case 3:
 			count3++
 		}
-		out = append(out, p)
+		out = append(out, previewRow{c.phone, c.namaOutlet, c.nomerInvoice, c.nextAttempt})
 	}
 	writeJSON(w, map[string]any{"rows": out, "count": len(out), "count2": count2, "count3": count3})
 }
