@@ -127,7 +127,20 @@ func zopozRepairAfterLogout(client *whatsmeow.Client) {
 }
 
 func zopozConnectAndPair(client *whatsmeow.Client) {
-	if client.Store.ID == nil {
+	if client.Store.ID != nil {
+		zopozState.setLoggedIn(true)
+		if err := client.Connect(); err != nil {
+			log.Printf("zopoz connect: %v", err)
+		}
+		return
+	}
+	// Belum login → tampilkan QR. QR WhatsApp hidup ~2,5 menit lalu timeout; di sini kita
+	// REGENERATE QR terus-menerus sampai ter-scan (tidak perlu restart tiap kali timeout).
+	for {
+		if client.IsConnected() {
+			client.Disconnect()
+			time.Sleep(1 * time.Second)
+		}
 		qrChan, err := client.GetQRChannel(context.Background())
 		if err != nil {
 			log.Printf("zopoz QR channel: %v", err)
@@ -137,6 +150,7 @@ func zopozConnectAndPair(client *whatsmeow.Client) {
 			log.Printf("zopoz connect: %v", err)
 			return
 		}
+		paired := false
 		for evt := range qrChan {
 			switch evt.Event {
 			case "code":
@@ -147,14 +161,13 @@ func zopozConnectAndPair(client *whatsmeow.Client) {
 				zopozState.setQR("")
 				zopozState.setLoggedIn(true)
 				log.Println("zopoz: pairing success")
+				paired = true
 			case "timeout":
-				log.Println("zopoz: QR timeout — restart untuk retry")
+				log.Println("zopoz: QR timeout — regenerate QR baru otomatis (tanpa restart)")
 			}
 		}
-	} else {
-		zopozState.setLoggedIn(true)
-		if err := client.Connect(); err != nil {
-			log.Printf("zopoz connect: %v", err)
+		if paired || client.Store.ID != nil {
+			return
 		}
 	}
 }
