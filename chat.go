@@ -55,20 +55,6 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 );
 CREATE INDEX IF NOT EXISTS idx_messages_phone ON chat_messages(phone, id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_wa_id ON chat_messages(wa_message_id) WHERE wa_message_id IS NOT NULL;
-
--- Log siapa yang menekan Done/Resolved. Satu baris per aksi resolve (append-only), jadi
--- record PIC yang menyelesaikan tetap awet walau thread di-blast ulang (yang me-reset
--- assigned_name). Report "report resolved" pakai entri TERAKHIR per nomor sebagai PIC.
-CREATE TABLE IF NOT EXISTS resolve_logs (
-	id INTEGER PRIMARY KEY AUTOINCREMENT,
-	phone TEXT NOT NULL,
-	nama_outlet TEXT,
-	nomer_invoice TEXT,
-	resolver_email TEXT,
-	resolver_name TEXT,
-	resolved_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_resolve_logs_phone ON resolve_logs(phone);
 `)
 	if err != nil {
 		return err
@@ -661,14 +647,10 @@ func handleSetStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Log resolver saat thread di-Done (append-only) — sumber PIC report "report resolved".
+	// Saat thread di-Done: tandai SEMUA invoice nomor ini resolved (permanen) — sumber PIC
+	// report "report resolved" + exclude dari antrian retry walau di-blast ulang nanti.
 	if status == "done" {
-		var namaOutlet, nomerInvoice string
-		_ = auditDB.QueryRow(`SELECT COALESCE(nama_outlet,''), COALESCE(nomer_invoice,'') FROM chat_threads WHERE phone = ?`, phone).Scan(&namaOutlet, &nomerInvoice)
-		if _, e := auditDB.Exec(`INSERT INTO resolve_logs (phone, nama_outlet, nomer_invoice, resolver_email, resolver_name, resolved_at) VALUES (?, ?, ?, ?, ?, datetime('now'))`,
-			phone, namaOutlet, nomerInvoice, user.Email, user.Name); e != nil {
-			fmt.Println("warn: insert resolve_logs (setStatus):", e)
-		}
+		markPhoneResolved("majoo", "blast_recipients", "blast_logs", phone, user.Email, user.Name, time.Now())
 	}
 
 	writeJSON(w, map[string]any{"ok": true})
@@ -795,13 +777,9 @@ func handleResolve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Log siapa yang me-resolve (append-only) — sumber PIC untuk report "report resolved".
-	var nomerInvoice string
-	_ = auditDB.QueryRow(`SELECT COALESCE(nomer_invoice, '') FROM chat_threads WHERE phone = ?`, phone).Scan(&nomerInvoice)
-	if _, e := auditDB.Exec(`INSERT INTO resolve_logs (phone, nama_outlet, nomer_invoice, resolver_email, resolver_name, resolved_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		phone, namaOutlet, nomerInvoice, user.Email, user.Name, now.Format(time.RFC3339)); e != nil {
-		fmt.Println("warn: insert resolve_logs:", e)
-	}
+	// Tandai SEMUA invoice nomor ini sebagai resolved (sumber report "report resolved" +
+	// exclude dari antrian retry, permanen walau di-blast ulang).
+	markPhoneResolved("majoo", "blast_recipients", "blast_logs", phone, user.Email, user.Name, now)
 
 	writeJSON(w, map[string]any{"ok": true, "closing_sent": true})
 }

@@ -67,6 +67,9 @@ func main() {
 	if err := initExclusions(); err != nil {
 		log.Fatalf("exclusions: %v", err)
 	}
+	if err := initResolvedInvoices(); err != nil {
+		log.Fatalf("resolved invoices: %v", err)
+	}
 	startRetryScheduler()
 	startZopozRetryScheduler()
 

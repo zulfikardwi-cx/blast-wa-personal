@@ -32,10 +32,11 @@ JOIN ` + threadsTbl + ` t ON t.phone = r.phone
 WHERE t.status NOT IN ('done','invalid','on_going','scheduled','force_close')
   AND COALESCE(r.nomer_invoice,'') != ''
   AND NOT EXISTS (SELECT 1 FROM excluded_invoices x WHERE x.suite=? AND x.phone=r.phone AND x.nomer_invoice=r.nomer_invoice)
+  AND NOT EXISTS (SELECT 1 FROM resolved_invoices rv WHERE rv.suite=? AND rv.phone=r.phone AND rv.nomer_invoice=r.nomer_invoice)
 GROUP BY r.phone, r.nomer_invoice
 HAVING max_att >= 1 AND max_att < 3
 ORDER BY max_att DESC, last_sent ASC`
-	rows, err := auditDB.Query(q, suite)
+	rows, err := auditDB.Query(q, suite, suite)
 	if err != nil {
 		return nil
 	}
@@ -63,6 +64,10 @@ ORDER BY max_att DESC, last_sent ASC`
 // (nextAttempt, true) kalau masih perlu dikirim; (0,false) kalau tidak.
 func invoiceStillNeedsRetry(suite, threadsTbl, recvTbl, logsTbl, phone, invoice string, startOfToday time.Time) (int, bool) {
 	if isInvoiceExcluded(suite, phone, invoice) {
+		return 0, false
+	}
+	// Sudah pernah Done/Resolved → jangan retry lagi walau nomornya di-blast ulang.
+	if isInvoiceResolved(suite, phone, invoice) {
 		return 0, false
 	}
 	var status string

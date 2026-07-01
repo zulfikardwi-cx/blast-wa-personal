@@ -73,6 +73,7 @@ JOIN chat_threads t ON t.phone = r.phone
 WHERE t.status IN ('after_blast', 'in_progress', 'rejected', 'force_close')
   AND COALESCE(r.nomer_invoice, '') != ''
   AND NOT EXISTS (SELECT 1 FROM excluded_invoices x WHERE x.suite='majoo' AND x.phone=r.phone AND x.nomer_invoice=r.nomer_invoice)
+  AND NOT EXISTS (SELECT 1 FROM resolved_invoices rv WHERE rv.suite='majoo' AND rv.phone=r.phone AND rv.nomer_invoice=r.nomer_invoice)
 GROUP BY r.phone, r.nomer_invoice
 ORDER BY r.phone ASC, r.nomer_invoice ASC`)
 	if err != nil {
@@ -230,28 +231,19 @@ type ResolvedRow struct {
 	PICEmail     string `json:"pic_email"`
 }
 
-// queryResolved — PER NOMOR INVOICE untuk semua thread berstatus 'done'. Satu nomor telepon
-// bisa punya banyak invoice (blast_recipients), jadi tiap invoice jadi baris sendiri dengan
-// tag PIC yang me-resolve. Sumber PIC: entri resolve_logs TERBARU per nomor (log database);
-// fallback ke chat_threads.assigned_name untuk thread yang di-Done sebelum fitur log ada.
+// queryResolved — PER NOMOR INVOICE yang sudah Done/Resolved, dari tabel resolved_invoices
+// (permanen: sekali di-Done tetap tercatat walau nomornya di-blast ulang untuk invoice lain).
+// Satu nomor bisa punya banyak invoice → tiap invoice jadi baris sendiri, di-tag PIC resolver.
 func queryResolved() ([]ResolvedRow, error) {
 	rows, err := auditDB.Query(`
-SELECT r.nomer_invoice,
-       COALESCE(MAX(r.nama_outlet), ''),
-       r.phone,
-       COALESCE(rl.resolver_name, t.assigned_name, ''),
-       COALESCE(rl.resolver_email, t.assigned_email, '')
-FROM blast_recipients r
-JOIN chat_threads t ON t.phone = r.phone
-LEFT JOIN (
-    SELECT phone, resolver_name, resolver_email
-    FROM resolve_logs
-    WHERE id IN (SELECT MAX(id) FROM resolve_logs GROUP BY phone)
-) rl ON rl.phone = r.phone
-WHERE t.status = 'done'
-  AND COALESCE(r.nomer_invoice, '') != ''
-GROUP BY r.phone, r.nomer_invoice
-ORDER BY r.phone ASC, r.nomer_invoice ASC`)
+SELECT nomer_invoice,
+       COALESCE(nama_outlet, ''),
+       phone,
+       COALESCE(resolver_name, ''),
+       COALESCE(resolver_email, '')
+FROM resolved_invoices
+WHERE suite = 'majoo'
+ORDER BY phone ASC, nomer_invoice ASC`)
 	if err != nil {
 		return nil, err
 	}
