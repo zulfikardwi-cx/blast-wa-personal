@@ -205,6 +205,7 @@
       <button class="tab active" data-tab="progress">Progress</button>
       <button class="tab" data-tab="history">Riwayat Blast (Audit Log)</button>
       <button class="tab" data-tab="report">Log Status Update</button>
+      <button class="tab" data-tab="resolved">Report Resolved</button>
     </div>
 
     <div class="tab-pane active" data-pane="progress">
@@ -262,6 +263,24 @@
       <div class="scroll"><table id="reportTable">
         <thead><tr>
           <th>Phone</th><th>Nama Outlet</th><th>Nomor Invoice</th><th>Status Attempt 1</th><th>Status Attempt 2</th><th>Status Attempt 3</th><th>Rejected</th><th>Info / Alasan</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table></div>
+    </div>
+
+    <div class="tab-pane" data-pane="resolved">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap">
+        <span style="color:var(--muted);font-size:12px">Daftar invoice yang sudah <b style="color:var(--lime)">Done / Resolved</b>, di-tag PIC yang menyelesaikan. Satu nomor dengan beberapa invoice tampil sebagai baris terpisah.</span>
+        <span id="resolvedCount" style="font-size:12px;color:var(--muted)"></span>
+        <span style="flex:1"></span>
+        <span id="resolvedSheetStatus" style="font-size:12px;color:var(--muted)"></span>
+        <button id="resolvedCsvBtn" class="ghost">⬇️ Download CSV</button>
+        <button id="resolvedSheetBtn" style="display:none">📊 Export ke Google Sheet</button>
+        <button class="ghost" id="refreshResolved">Refresh</button>
+      </div>
+      <div class="scroll"><table id="resolvedTable">
+        <thead><tr>
+          <th>Nomor Invoice</th><th>Nama Outlet</th><th>Nomor User</th><th>Nama PIC (Resolved)</th>
         </tr></thead>
         <tbody></tbody>
       </table></div>
@@ -536,6 +555,7 @@ $$('.tab').forEach(t => t.addEventListener('click', () => {
   $(`[data-pane="${t.dataset.tab}"]`).classList.add('active');
   if (t.dataset.tab === 'history') loadHistory();
   if (t.dataset.tab === 'report') loadReport();
+  if (t.dataset.tab === 'resolved') loadResolved();
 }));
 
 $('#refreshHistory').addEventListener('click', loadHistory);
@@ -784,6 +804,63 @@ $('#reportSheetBtn').addEventListener('click', async () => {
   btn.disabled = true; btn.textContent = '⏳ Exporting...';
   try {
     const r = await apiFetch('/api/report/export-sheet', { method: 'POST' });
+    if (!r.ok) { alert('Export gagal: ' + await r.text()); btn.textContent = original; btn.disabled = false; return; }
+    const d = await r.json();
+    btn.textContent = `✅ ${d.rows} baris → ${esc(d.sheet_name)}`;
+    setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 3000);
+    if (d.sheet_url) window.open(d.sheet_url, '_blank');
+  } catch (e) { alert('Export error: ' + e.message); btn.textContent = original; btn.disabled = false; }
+});
+
+// ---- Report Resolved (invoice yang sudah Done, di-tag PIC) ----
+async function loadResolved() {
+  try {
+    const r = await apiFetch('/api/report/resolved').then(r => r.json());
+    const tb = $('#resolvedTable tbody');
+    tb.innerHTML = '';
+    (r.rows || []).forEach(row => {
+      const tr = document.createElement('tr');
+      tr.className = 'history-row';
+      tr.innerHTML = `
+        <td>${esc(row.nomer_invoice)}</td>
+        <td>${esc(row.nama_outlet)}</td>
+        <td>${esc(row.phone)}</td>
+        <td>${esc(row.pic_name || '-')}${row.pic_email ? `<br><small style="color:var(--muted)">${esc(row.pic_email)}</small>` : ''}</td>`;
+      tb.appendChild(tr);
+    });
+    const n = r.count || 0;
+    $('#resolvedCount').textContent = n + ' invoice';
+    if (!n) tb.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:20px">Belum ada invoice yang di-resolve.</td></tr>';
+    $('#resolvedSheetBtn').style.display = (sheetCfg && sheetCfg.enabled) ? '' : 'none';
+    $('#resolvedSheetStatus').textContent = (sheetCfg && sheetCfg.enabled) ? '' : 'Sheets export belum aktif';
+  } catch (e) { /* ignore */ }
+}
+
+$('#refreshResolved').addEventListener('click', loadResolved);
+
+$('#resolvedCsvBtn').addEventListener('click', async () => {
+  const btn = $('#resolvedCsvBtn');
+  const original = btn.textContent;
+  btn.disabled = true; btn.textContent = '⏳ ...';
+  try {
+    const r = await apiFetch('/api/report/resolved.csv');
+    if (!r.ok) { alert('Download gagal: ' + await r.text()); return; }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'report-resolved.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  } catch (e) { alert('Download error: ' + e.message); }
+  finally { btn.textContent = original; btn.disabled = false; }
+});
+
+$('#resolvedSheetBtn').addEventListener('click', async () => {
+  const btn = $('#resolvedSheetBtn');
+  const original = btn.textContent;
+  btn.disabled = true; btn.textContent = '⏳ Exporting...';
+  try {
+    const r = await apiFetch('/api/report/resolved/export-sheet', { method: 'POST' });
     if (!r.ok) { alert('Export gagal: ' + await r.text()); btn.textContent = original; btn.disabled = false; return; }
     const d = await r.json();
     btn.textContent = `✅ ${d.rows} baris → ${esc(d.sheet_name)}`;

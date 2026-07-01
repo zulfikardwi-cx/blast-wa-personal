@@ -155,6 +155,9 @@ func main() {
 	mux.HandleFunc("/api/report/unresponsive", corsMiddleware(requireAuth(handleReportUnresponsive)))
 	mux.HandleFunc("/api/report/unresponsive.csv", corsMiddleware(requireAuth(handleReportUnresponsiveCSV)))
 	mux.HandleFunc("/api/report/export-sheet", corsMiddleware(requireAuth(handleReportExportSheet)))
+	mux.HandleFunc("/api/report/resolved", corsMiddleware(requireAuth(handleReportResolved)))
+	mux.HandleFunc("/api/report/resolved.csv", corsMiddleware(requireAuth(handleReportResolvedCSV)))
+	mux.HandleFunc("/api/report/resolved/export-sheet", corsMiddleware(requireAuth(handleReportResolvedExportSheet)))
 
 	// Inbox Chat endpoints
 	mux.HandleFunc("/api/inbox/threads", corsMiddleware(requireAuth(handleThreads)))

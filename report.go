@@ -211,3 +211,138 @@ func handleReportExportSheet(w http.ResponseWriter, r *http.Request) {
 		"sheet_name": sn,
 	})
 }
+
+// ---- Report Resolved (siapa PIC yang menyelesaikan tiap invoice) ----
+
+// resolvedSheetName — tab untuk report resolved. Override via GSHEET_RESOLVED_SHEET_NAME.
+func resolvedSheetName() string {
+	if n := os.Getenv("GSHEET_RESOLVED_SHEET_NAME"); n != "" {
+		return n
+	}
+	return "report resolved"
+}
+
+type ResolvedRow struct {
+	NomerInvoice string `json:"nomer_invoice"`
+	NamaOutlet   string `json:"nama_outlet"`
+	Phone        string `json:"phone"`
+	PICName      string `json:"pic_name"`
+	PICEmail     string `json:"pic_email"`
+}
+
+// queryResolved — PER NOMOR INVOICE untuk semua thread berstatus 'done'. Satu nomor telepon
+// bisa punya banyak invoice (blast_recipients), jadi tiap invoice jadi baris sendiri dengan
+// tag PIC yang me-resolve. Sumber PIC: entri resolve_logs TERBARU per nomor (log database);
+// fallback ke chat_threads.assigned_name untuk thread yang di-Done sebelum fitur log ada.
+func queryResolved() ([]ResolvedRow, error) {
+	rows, err := auditDB.Query(`
+SELECT r.nomer_invoice,
+       COALESCE(MAX(r.nama_outlet), ''),
+       r.phone,
+       COALESCE(rl.resolver_name, t.assigned_name, ''),
+       COALESCE(rl.resolver_email, t.assigned_email, '')
+FROM blast_recipients r
+JOIN chat_threads t ON t.phone = r.phone
+LEFT JOIN (
+    SELECT phone, resolver_name, resolver_email
+    FROM resolve_logs
+    WHERE id IN (SELECT MAX(id) FROM resolve_logs GROUP BY phone)
+) rl ON rl.phone = r.phone
+WHERE t.status = 'done'
+  AND COALESCE(r.nomer_invoice, '') != ''
+GROUP BY r.phone, r.nomer_invoice
+ORDER BY r.phone ASC, r.nomer_invoice ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ResolvedRow{}
+	for rows.Next() {
+		var row ResolvedRow
+		if err := rows.Scan(&row.NomerInvoice, &row.NamaOutlet, &row.Phone, &row.PICName, &row.PICEmail); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+// handleReportResolved — JSON list untuk render tabel di UI.
+func handleReportResolved(w http.ResponseWriter, r *http.Request) {
+	list, err := queryResolved()
+	if err != nil {
+		httpErr(w, 500, "query: %v", err)
+		return
+	}
+	writeJSON(w, map[string]any{"rows": list, "count": len(list)})
+}
+
+var resolvedHeader = []string{"Nomor Invoice", "Nama Outlet", "Nomor User", "Nama PIC (Resolved)"}
+
+// handleReportResolvedCSV — download CSV.
+func handleReportResolvedCSV(w http.ResponseWriter, r *http.Request) {
+	list, err := queryResolved()
+	if err != nil {
+		httpErr(w, 500, "query: %v", err)
+		return
+	}
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="report-resolved.csv"`)
+	cw := csv.NewWriter(w)
+	_ = cw.Write(resolvedHeader)
+	for _, row := range list {
+		_ = cw.Write([]string{row.NomerInvoice, row.NamaOutlet, row.Phone, row.PICName})
+	}
+	cw.Flush()
+}
+
+// handleReportResolvedExportSheet — push report ke tab "report resolved" di Google Sheet.
+func handleReportResolvedExportSheet(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", 405)
+		return
+	}
+	if sheetsSvc == nil {
+		httpErr(w, 400, "Sheets export belum dikonfigurasi. Set GOOGLE_SERVICE_ACCOUNT_JSON + GSHEET_SPREADSHEET_ID di .env, lalu restart backend.")
+		return
+	}
+	list, err := queryResolved()
+	if err != nil {
+		httpErr(w, 500, "query: %v", err)
+		return
+	}
+
+	sn := resolvedSheetName()
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	if err := ensureSheetExists(ctx, sn); err != nil {
+		httpErr(w, 500, "siapkan tab '%s': %v", sn, err)
+		return
+	}
+
+	values := [][]any{{"Nomor Invoice", "Nama Outlet", "Nomor User", "Nama PIC (Resolved)"}}
+	for _, row := range list {
+		// prefix ' supaya Sheets treat nomor sebagai text (bukan scientific notation)
+		values = append(values, []any{row.NomerInvoice, row.NamaOutlet, "'" + row.Phone, row.PICName})
+	}
+
+	clearRange := fmt.Sprintf("%s!A:D", sn)
+	if _, err := sheetsSvc.Spreadsheets.Values.Clear(spreadsheetID, clearRange, &sheets.ClearValuesRequest{}).Context(ctx).Do(); err != nil {
+		httpErr(w, 500, "clear sheet: %v. Pastikan service account punya akses Editor.", err)
+		return
+	}
+	writeRange := fmt.Sprintf("%s!A1", sn)
+	if _, err := sheetsSvc.Spreadsheets.Values.Update(spreadsheetID, writeRange, &sheets.ValueRange{Values: values}).
+		ValueInputOption("USER_ENTERED").Context(ctx).Do(); err != nil {
+		httpErr(w, 500, "write sheet: %v", err)
+		return
+	}
+
+	writeJSON(w, map[string]any{
+		"ok":         true,
+		"rows":       len(list),
+		"sheet_url":  fmt.Sprintf("https://docs.google.com/spreadsheets/d/%s/edit", spreadsheetID),
+		"sheet_name": sn,
+	})
+}

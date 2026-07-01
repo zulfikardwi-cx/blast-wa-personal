@@ -55,6 +55,20 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 );
 CREATE INDEX IF NOT EXISTS idx_messages_phone ON chat_messages(phone, id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_wa_id ON chat_messages(wa_message_id) WHERE wa_message_id IS NOT NULL;
+
+-- Log siapa yang menekan Done/Resolved. Satu baris per aksi resolve (append-only), jadi
+-- record PIC yang menyelesaikan tetap awet walau thread di-blast ulang (yang me-reset
+-- assigned_name). Report "report resolved" pakai entri TERAKHIR per nomor sebagai PIC.
+CREATE TABLE IF NOT EXISTS resolve_logs (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	phone TEXT NOT NULL,
+	nama_outlet TEXT,
+	nomer_invoice TEXT,
+	resolver_email TEXT,
+	resolver_name TEXT,
+	resolved_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_resolve_logs_phone ON resolve_logs(phone);
 `)
 	if err != nil {
 		return err
@@ -619,13 +633,16 @@ func handleSetStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	user, _ := userFromCtx(r.Context())
 
-	// Kalau status in_progress / on_going / scheduled, auto-assign ke user yang klik (PIC)
+	// Auto-assign PIC ke user yang klik:
+	//   - in_progress / on_going / scheduled → PIC penangan.
+	//   - done → PIC = orang yang menyelesaikan (resolver). Alur Done di inbox lewat sini
+	//     (sendReply → setStatus 'done'), jadi resolver DICATAT di sini (bukan di-clear).
+	//   - open / invalid / force_close → clear (netral). Re-open otomatis melepas PIC.
 	var assignedEmail, assignedName sql.NullString
-	if status == "in_progress" || status == "on_going" || status == "scheduled" {
+	if status == "in_progress" || status == "on_going" || status == "scheduled" || status == "done" {
 		assignedEmail = sql.NullString{String: user.Email, Valid: true}
 		assignedName = sql.NullString{String: user.Name, Valid: true}
 	} else {
-		// open / done / invalid → clear assignment
 		assignedEmail = sql.NullString{}
 		assignedName = sql.NullString{}
 	}
@@ -643,6 +660,17 @@ func handleSetStatus(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 500, "update: %v", err)
 		return
 	}
+
+	// Log resolver saat thread di-Done (append-only) — sumber PIC report "report resolved".
+	if status == "done" {
+		var namaOutlet, nomerInvoice string
+		_ = auditDB.QueryRow(`SELECT COALESCE(nama_outlet,''), COALESCE(nomer_invoice,'') FROM chat_threads WHERE phone = ?`, phone).Scan(&namaOutlet, &nomerInvoice)
+		if _, e := auditDB.Exec(`INSERT INTO resolve_logs (phone, nama_outlet, nomer_invoice, resolver_email, resolver_name, resolved_at) VALUES (?, ?, ?, ?, ?, datetime('now'))`,
+			phone, namaOutlet, nomerInvoice, user.Email, user.Name); e != nil {
+			fmt.Println("warn: insert resolve_logs (setStatus):", e)
+		}
+	}
+
 	writeJSON(w, map[string]any{"ok": true})
 }
 
@@ -765,6 +793,14 @@ func handleResolve(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		httpErr(w, 500, "update status: %v", err)
 		return
+	}
+
+	// Log siapa yang me-resolve (append-only) — sumber PIC untuk report "report resolved".
+	var nomerInvoice string
+	_ = auditDB.QueryRow(`SELECT COALESCE(nomer_invoice, '') FROM chat_threads WHERE phone = ?`, phone).Scan(&nomerInvoice)
+	if _, e := auditDB.Exec(`INSERT INTO resolve_logs (phone, nama_outlet, nomer_invoice, resolver_email, resolver_name, resolved_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		phone, namaOutlet, nomerInvoice, user.Email, user.Name, now.Format(time.RFC3339)); e != nil {
+		fmt.Println("warn: insert resolve_logs:", e)
 	}
 
 	writeJSON(w, map[string]any{"ok": true, "closing_sent": true})
