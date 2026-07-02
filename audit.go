@@ -194,7 +194,6 @@ func closeStaleRunningBlasts() {
 	for _, t := range []struct{ logs, recv string }{
 		{"blast_logs", "blast_recipients"},
 		{"zopoz_blast_logs", "zopoz_blast_recipients"},
-		{"watzap_blast_logs", "watzap_blast_recipients"},
 	} {
 		res, err := auditDB.Exec(`UPDATE ` + t.logs + ` SET
 			sent = (SELECT COUNT(*) FROM ` + t.recv + ` r WHERE r.blast_log_id = ` + t.logs + `.id AND r.status='sent'),
