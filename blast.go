@@ -242,6 +242,11 @@ func renderTemplate(tpl string, r *RecipientStatus) string {
 	return out
 }
 
+// maxConsecutive463 — jumlah berturut-turut error 463 sebelum blast di-abort.
+// 463 = WA session bermasalah (device tidak dipercaya / session expired) → semua send
+// berikutnya pasti gagal juga. Lebih baik abort sekarang, perbaiki sesi WA, lalu re-blast.
+const maxConsecutive463 = 3
+
 func runBlast(ctx context.Context, job *BlastJob) {
 	defer func() {
 		now := time.Now()
@@ -253,6 +258,8 @@ func runBlast(ctx context.Context, job *BlastJob) {
 			fmt.Println("audit end failed:", err)
 		}
 	}()
+
+	consecutive463 := 0
 
 	for i, rec := range job.Items {
 		select {
@@ -282,7 +289,27 @@ func runBlast(ctx context.Context, job *BlastJob) {
 			rec.Error = sendErr.Error()
 			job.Failed++
 			job.mu.Unlock()
+
+			if is463Err(sendErr) {
+				consecutive463++
+				if consecutive463 >= maxConsecutive463 {
+					fmt.Printf("blast: %d error 463 berturut-turut — WA session bermasalah, abort blast\n", consecutive463)
+					job.mu.Lock()
+					for _, it := range job.Items {
+						if it.Status == "pending" {
+							it.Status = "skipped"
+							it.Error = "aborted: WA error 463"
+							job.Skipped++
+						}
+					}
+					job.mu.Unlock()
+					return
+				}
+			} else {
+				consecutive463 = 0
+			}
 		} else {
+			consecutive463 = 0
 			job.mu.Lock()
 			rec.Status = "sent"
 			rec.SentAt = time.Now().Format(time.RFC3339)
@@ -340,6 +367,14 @@ func isInvalidNumberErr(err error) bool {
 		return false
 	}
 	return strings.Contains(strings.ToLower(err.Error()), "tidak terdaftar")
+}
+
+// is463Err — true kalau server mengembalikan error 463 (device tidak dipercaya / session expired).
+func is463Err(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "463")
 }
 
 func sendOne(phone, body string) error {
