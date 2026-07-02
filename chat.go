@@ -181,14 +181,11 @@ SELECT r.phone, r.nama_outlet, r.nomer_invoice, r.blast_log_id,
 FROM blast_recipients r
 JOIN (SELECT phone, MAX(id) AS maxid FROM blast_recipients
       WHERE status='failed'
-        -- Kegagalan karena koneksi WA putus/logout (bukan nomor invalid) JANGAN jadi
-        -- thread 'rejected' — nomornya valid, cuma gagal transport (mis. device removed
-        -- di tengah blast). Biarkan bisa di-blast ulang bersih.
-        AND COALESCE(error,'') NOT LIKE '%usync%'
-        AND COALESCE(error,'') NOT LIKE '%websocket%'
-        AND COALESCE(error,'') NOT LIKE '%not connected%'
-        AND COALESCE(error,'') NOT LIKE '%logged out%'
-        AND COALESCE(error,'') NOT LIKE '%close sent%'
+        -- HANYA nomor yang benar-benar tidak terdaftar di WA yang jadi thread 'rejected'.
+        -- Kegagalan lain (koneksi putus/logout, error 463 device baru, rate-limit, server)
+        -- = nomor valid, gagal transport/anti-spam sementara → jangan jadi rejected, biar
+        -- bisa di-blast ulang bersih.
+        AND COALESCE(error,'') LIKE '%tidak terdaftar%'
       GROUP BY phone) m
 	ON r.id = m.maxid
 WHERE NOT EXISTS (SELECT 1 FROM chat_threads t WHERE t.phone = r.phone)`)

@@ -305,15 +305,17 @@ func runBlast(ctx context.Context, job *BlastJob) {
 				fmt.Println("warn: recordChatMessage outgoing blast:", err)
 			}
 		} else if rec.Status == "failed" {
-			// Attempt 1 gagal kirim → tandai thread 'rejected' supaya muncul di Log Status
-			// Update (Attempt 1 = "Rejected", kolom Rejected = "reject") utk di-reject tim WO.
-			// TAPI kalau gagalnya karena koneksi WA putus/logout (bukan nomor invalid),
-			// JANGAN tandai rejected — nomornya valid, cuma gagal transport; biarkan bisa
-			// di-blast ulang bersih. (mis. saat WA "device removed" di tengah blast.)
-			if isConnLostErr(sendErr) {
-				fmt.Println("info: gagal kirim karena koneksi WA putus (tidak di-reject):", rec.Phone, "-", rec.Error)
-			} else if err := upsertThreadBlastFailed(rec.Phone, rec.NamaOutlet, rec.NomerInv, job.auditID, rec.Error, time.Now()); err != nil {
-				fmt.Println("warn: upsertThreadBlastFailed:", err)
+			// Tandai thread 'rejected' (Attempt 1 = "Rejected", kolom Rejected = "reject",
+			// untuk di-reject tim WO) HANYA kalau nomornya benar-benar tidak terdaftar di WA.
+			// Kegagalan lain (koneksi putus/logout, error 463 device baru, rate-limit, server)
+			// = nomor valid, gagal transport/anti-spam sementara → JANGAN reject, biar bisa
+			// di-blast ulang bersih.
+			if isInvalidNumberErr(sendErr) {
+				if err := upsertThreadBlastFailed(rec.Phone, rec.NamaOutlet, rec.NomerInv, job.auditID, rec.Error, time.Now()); err != nil {
+					fmt.Println("warn: upsertThreadBlastFailed:", err)
+				}
+			} else {
+				fmt.Println("info: gagal kirim non-invalid (tidak di-reject):", rec.Phone, "-", rec.Error)
 			}
 		}
 
@@ -327,24 +329,17 @@ func runBlast(ctx context.Context, job *BlastJob) {
 	}
 }
 
-// isConnLostErr — true kalau kegagalan kirim disebabkan koneksi WA putus/logout/timeout
-// (BUKAN nomor tidak terdaftar). Dipakai supaya kegagalan transport di tengah blast tidak
-// salah menandai nomor valid sebagai 'rejected'. Pola error di-cek lowercase; juga true
-// kalau client memang sedang tidak login (mis. habis "device removed").
-func isConnLostErr(err error) bool {
+// isInvalidNumberErr — true HANYA kalau kegagalan kirim karena nomor benar-benar tidak
+// terdaftar di WhatsApp (dari cek IsOnWhatsApp di sendOne). Hanya kasus inilah yang layak
+// ditandai 'rejected' untuk tim WO. Semua kegagalan lain — koneksi putus/logout, usync/
+// websocket, error 463 (device baru belum dipercaya), 429/rate-limit, 5xx server — berarti
+// nomornya VALID, cuma gagal transport/anti-spam sementara → JANGAN di-reject, biar bisa
+// di-blast ulang bersih.
+func isInvalidNumberErr(err error) bool {
 	if err == nil {
 		return false
 	}
-	if state.client == nil || !state.client.IsLoggedIn() {
-		return true
-	}
-	s := strings.ToLower(err.Error())
-	for _, k := range []string{"usync", "websocket", "not connected", "not logged in", "logged out", "close sent", "eof", "connection reset", "broken pipe", "context deadline", "disconnect"} {
-		if strings.Contains(s, k) {
-			return true
-		}
-	}
-	return false
+	return strings.Contains(strings.ToLower(err.Error()), "tidak terdaftar")
 }
 
 func sendOne(phone, body string) error {
