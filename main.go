@@ -70,6 +70,11 @@ func main() {
 	if err := initResolvedInvoices(); err != nil {
 		log.Fatalf("resolved invoices: %v", err)
 	}
+	// Watzap (channel gateway HTTP, tanpa whatsmeow) — aditif, tabel terpisah.
+	initWatzap()
+	if err := initWatzapBlastAudit(); err != nil {
+		log.Fatalf("watzap blast audit: %v", err)
+	}
 	closeStaleRunningBlasts()
 	startRetryScheduler()
 	startZopozRetryScheduler()
@@ -199,6 +204,13 @@ func main() {
 	mux.HandleFunc("/api/zopoz/status", corsMiddleware(requireAuth(zopozHandleSetStatus)))
 	mux.HandleFunc("/api/zopoz/reply", corsMiddleware(requireAuth(zopozHandleReply)))
 	mux.HandleFunc("/api/zopoz/media", zopozHandleMedia)
+
+	// ---- Watzap (channel gateway HTTP) — Fase 1: status/templates/blast/progress/history ----
+	mux.HandleFunc("/api/watzap/status", corsMiddleware(requireAuth(watzapHandleStatus)))
+	mux.HandleFunc("/api/watzap/templates", corsMiddleware(requireAuth(watzapHandleTemplates)))
+	mux.HandleFunc("/api/watzap/blast", corsMiddleware(requireAuth(watzapHandleBlast)))
+	mux.HandleFunc("/api/watzap/progress", corsMiddleware(requireAuth(watzapHandleProgress)))
+	mux.HandleFunc("/api/watzap/history", corsMiddleware(requireAuth(watzapHandleHistory)))
 
 	addr := os.Getenv("ADDR")
 	if addr == "" {

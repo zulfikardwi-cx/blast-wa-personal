@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Watzap Blast — Blast WA Personal</title>
+<script src="config.js"></script>
+<style>
+  :root {
+    --bg:#0b1220; --panel:#121a2b; --panel2:#0f1626; --line:#223;
+    --text:#e6ecff; --muted:#8b97b8;
+    --teal:#2DBDB6; --lime:#9ACF87; --teal-soft:rgba(45,189,182,.15);
+    --accent2:#3b82f6; --warn:#f59e0b; --danger:#ef4444;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+  header{padding:14px 24px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:16px;background:var(--panel)}
+  header .logo{height:28px;width:auto;display:block}
+  header a.nav{color:var(--muted);text-decoration:none;font-size:13px;padding:4px 10px;border-radius:6px;border:1px solid var(--line)}
+  header a.nav:hover{color:var(--teal);border-color:var(--teal)}
+  header a.nav.active{color:var(--teal);border-color:var(--teal);background:var(--teal-soft)}
+  header .brand{display:inline-flex;align-items:center;text-decoration:none;transition:opacity .12s}
+  header .brand:hover{opacity:.8}
+  header .brand .zlogo{height:15px;width:auto;display:block}
+  header .brand-majoo:not(.active) .logo{filter:grayscale(1) opacity(.5)}
+  .status-pill{font-size:12px;padding:4px 10px;border-radius:999px;background:#1f2937;color:var(--muted)}
+  .status-pill.ok{background:rgba(45,189,182,.2);color:var(--teal)}
+  .status-pill.warn{background:#78350f;color:#fde68a}
+  .status-pill.err{background:#7f1d1d;color:#fecaca}
+  .subnav{padding:8px 24px;border-bottom:1px solid var(--line);background:var(--panel2);display:flex;gap:8px;align-items:center}
+  .subnav a{font-size:12px;color:var(--muted);text-decoration:none;padding:4px 10px;border-radius:6px;border:1px solid var(--line)}
+  .subnav a.active{color:var(--teal);border-color:var(--teal);background:var(--teal-soft)}
+  .subnav .hint{font-size:11px;color:var(--muted);margin-left:auto}
+  main{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:16px;max-width:1400px;margin:0 auto}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px}
+  .card h2{margin:0 0 12px;font-size:14px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
+  input[type=text],input[type=number]{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:10px;font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
+  input:focus{outline:none;border-color:var(--teal)}
+  input[type=file]{font-size:12px;color:var(--muted)}
+  .row{display:flex;gap:12px}
+  .row > *{flex:1}
+  button{background:var(--teal);color:#0b1220;border:0;padding:10px 16px;border-radius:6px;font-weight:600;cursor:pointer;transition:filter .15s}
+  button:hover:not(:disabled){filter:brightness(1.1)}
+  button.ghost{background:transparent;color:var(--text);border:1px solid var(--line)}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  .vars{font-size:12px;color:var(--muted);margin-top:6px}
+  .vars code{background:var(--panel2);padding:2px 6px;border-radius:4px;color:var(--lime)}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  th{color:var(--muted);font-weight:500;background:var(--panel2);position:sticky;top:0}
+  .scroll{max-height:340px;overflow:auto;border:1px solid var(--line);border-radius:6px}
+  .badge{font-size:11px;padding:2px 6px;border-radius:4px}
+  .b-pending{background:#1f2937;color:var(--muted)}
+  .b-sent{background:rgba(154,207,135,.2);color:var(--lime)}
+  .b-failed{background:#7f1d1d;color:#fecaca}
+  .b-skipped{background:#374151;color:#d1d5db}
+  .summary{display:flex;gap:12px;margin-bottom:8px}
+  .stat{flex:1;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:8px;text-align:center}
+  .stat .n{font-size:18px;font-weight:600}
+  .stat .l{font-size:11px;color:var(--muted);text-transform:uppercase}
+  .warn{background:#78350f;color:#fde68a;padding:10px;border-radius:6px;font-size:12px;margin-bottom:12px}
+  .err{color:#fca5a5;font-size:11px}
+  .truncate{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  pre.preview{background:var(--panel2);border:1px solid var(--line);padding:10px;border-radius:6px;white-space:pre-wrap;font-size:12px;max-height:140px;overflow:auto}
+  .tab-row{display:flex;gap:4px;margin-bottom:12px;border-bottom:1px solid var(--line)}
+  .tab{padding:8px 14px;background:transparent;color:var(--muted);border:0;border-bottom:2px solid transparent;cursor:pointer;font-size:13px;font-weight:500}
+  .tab.active{color:var(--teal);border-bottom-color:var(--teal)}
+  .tab-pane{display:none}
+  .tab-pane.active{display:block}
+  .history-row:hover{background:var(--panel2)}
+  .you-tag{background:var(--teal-soft);color:var(--teal);font-size:10px;padding:1px 5px;border-radius:3px;margin-left:4px}
+  .global-err{background:#7f1d1d;color:#fecaca;padding:10px 24px;font-size:13px}
+  .kv{font-size:12px;color:var(--muted)}
+  .kv b{color:var(--text)}
+</style>
+</head>
+<body>
+<div id="apiErrBanner" class="global-err" style="display:none"></div>
+
+<header>
+  <a href="index.html" class="brand brand-majoo" title="majoo"><img src="assets/majoo-logo.svg" class="logo" alt="majoo" /></a>
+  <a href="watzap-blast.html" class="nav active">Watzap</a>
+  <a href="index.html" class="nav">majoo</a>
+  <a href="zopoz-blast.html" class="nav">Zopoz</a>
+  <span style="flex:1"></span>
+  <span id="waStatus" class="status-pill">cek...</span>
+  <a href="profil.html" class="ghost" style="text-decoration:none;padding:6px 12px;border-radius:6px;border:1px solid var(--line);color:var(--text);font-size:13px">Profil</a>
+  <button id="appLogout" class="ghost">Logout</button>
+</header>
+
+<div class="subnav">
+  <a href="watzap-blast.html" class="active">📤 Blast</a>
+  <a href="watzap.html">📥 Inbox <span id="navUnread" style="background:var(--lime);color:#0b1220;padding:1px 6px;border-radius:8px;margin-left:4px;font-size:10px;display:none"></span></a>
+  <span class="hint">Suite Watzap — broadcast via gateway watzap.id (bukan perangkat tertaut). Inbox menyusul (Fase 2).</span>
+</div>
+
+<main>
+  <section class="card">
+    <h2>1 · Koneksi Watzap</h2>
+    <div id="cfgWarn" class="warn" style="display:none">
+      Watzap belum aktif. Set <code>WATZAP_API_KEY</code> + <code>WATZAP_NUMBER_KEY</code> di <code>.env</code> lalu restart backend.
+    </div>
+    <div class="kv" id="cfgInfo">Memeriksa konfigurasi…</div>
+    <div class="vars" style="margin-top:10px">Broadcast dikirim lewat HTTP API watzap.id — tidak ada QR / perangkat tertaut. Kualitas pengiriman tergantung reputasi nomor di watzap.</div>
+  </section>
+
+  <section class="card">
+    <h2>2 · Broadcast (Attempt 1)</h2>
+    <label>File CSV (kolom wajib: <code>phone</code>, <code>nama_outlet</code>, <code>nomer_invoice</code>)</label>
+    <input type="file" id="csvFile" accept=".csv" />
+    <div id="csvInfo" class="vars" style="margin-top:6px"></div>
+    <div class="row" style="margin-top:12px">
+      <div><label>Delay min (detik)</label><input type="number" id="minDelay" value="40" min="2" /></div>
+      <div><label>Delay max (detik)</label><input type="number" id="maxDelay" value="60" min="2" /></div>
+    </div>
+    <details style="margin-top:12px"><summary style="cursor:pointer;color:var(--muted);font-size:12px">Lihat template Attempt 1</summary>
+      <pre class="preview" id="tplPreview">memuat…</pre>
+    </details>
+    <div style="margin-top:12px;display:flex;gap:10px;align-items:center">
+      <button id="startBtn" disabled>Mulai Blast Watzap</button>
+      <button id="cancelBtn" class="ghost" style="display:none">Reset</button>
+    </div>
+  </section>
+
+  <section class="card" style="grid-column:1/-1">
+    <div class="tab-row">
+      <button class="tab active" data-tab="progress">Progress</button>
+      <button class="tab" data-tab="history">Riwayat Blast Watzap</button>
+    </div>
+
+    <div class="tab-pane active" data-pane="progress">
+      <div class="summary">
+        <div class="stat"><div class="n" id="sTotal">0</div><div class="l">Total</div></div>
+        <div class="stat"><div class="n" id="sSent" style="color:var(--lime)">0</div><div class="l">Sent</div></div>
+        <div class="stat"><div class="n" id="sFailed" style="color:#fecaca">0</div><div class="l">Failed</div></div>
+        <div class="stat"><div class="n" id="sPending">0</div><div class="l">Pending</div></div>
+      </div>
+      <div class="scroll"><table id="progTable">
+        <thead><tr><th>#</th><th>Phone</th><th>Outlet</th><th>Invoice</th><th>Status</th><th>Pesan / Error</th><th>Sent At</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+    </div>
+
+    <div class="tab-pane" data-pane="history">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap">
+        <span style="color:var(--muted);font-size:12px">100 blast Watzap terakhir, lintas semua user</span>
+        <span style="flex:1"></span>
+        <button class="ghost" id="refreshHistory">Refresh</button>
+      </div>
+      <div class="scroll"><table id="historyTable">
+        <thead><tr><th>Waktu</th><th>User</th><th>Total</th><th>Sent</th><th>Failed</th><th>Durasi</th><th>Template</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+    </div>
+  </section>
+</main>
+
+<script>
+const API_BASE = (window.APP_CONFIG && window.APP_CONFIG.API_BASE) || '';
+let me = null, parsedRows = [], progTimer = null;
+const $ = s => document.querySelector(s);
+const $$ = s => document.querySelectorAll(s);
+function esc(s){ return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function apiFetch(path, opts = {}) {
+  return fetch(API_BASE + path, { credentials: 'include', ...opts }).then(r => {
+    if (r.status === 401) { location.href = 'login.html'; throw new Error('unauthorized'); }
+    return r;
+  });
+}
+
+async function loadMe() {
+  try { me = await apiFetch('/api/me').then(r => r.json()); } catch (e) { me = null; }
+}
+
+async function loadStatus() {
+  try {
+    const d = await apiFetch('/api/watzap/status').then(r => r.json());
+    const pill = $('#waStatus');
+    if (d.enabled) {
+      pill.textContent = 'Watzap Aktif'; pill.className = 'status-pill ok';
+      $('#cfgWarn').style.display = 'none';
+      $('#cfgInfo').innerHTML = `Gateway: <b>${esc(d.base_url)}</b> · number_key: <b>${esc(d.number_key)}</b> · siap broadcast.`;
+    } else {
+      pill.textContent = 'Watzap belum aktif'; pill.className = 'status-pill err';
+      $('#cfgWarn').style.display = 'block';
+      $('#cfgInfo').textContent = 'Kredensial belum diset.';
+    }
+    updateStartBtn(d.enabled);
+  } catch (e) {
+    $('#waStatus').textContent = 'Watzap belum aktif'; $('#waStatus').className = 'status-pill err';
+    $('#cfgWarn').style.display = 'block';
+  }
+}
+
+async function loadTemplate() {
+  try {
+    const d = await apiFetch('/api/watzap/templates').then(r => r.json());
+    $('#tplPreview').textContent = d.attempt_1 || '(template kosong)';
+  } catch (e) { $('#tplPreview').textContent = '(gagal memuat template)'; }
+}
+
+// ---- CSV preview (client-side, ringan) hanya untuk hitung baris + validasi header ----
+$('#csvFile').addEventListener('change', async e => {
+  parsedRows = [];
+  const f = e.target.files[0];
+  if (!f) { $('#csvInfo').textContent = ''; updateStartBtn(); return; }
+  const text = await f.text();
+  const lines = text.replace(/\r/g,'').split('\n').filter(l => l.trim());
+  if (!lines.length) { $('#csvInfo').innerHTML = '<span class="err">CSV kosong</span>'; updateStartBtn(); return; }
+  const header = lines[0].replace(/^﻿/,'').split(',').map(h => h.trim().toLowerCase());
+  const need = ['phone','nama_outlet','nomer_invoice'];
+  const missing = need.filter(n => !header.includes(n));
+  if (missing.length) { $('#csvInfo').innerHTML = `<span class="err">Header wajib kurang: ${missing.join(', ')}</span>`; updateStartBtn(); return; }
+  parsedRows = lines.slice(1);
+  $('#csvInfo').innerHTML = `<b style="color:var(--lime)">${parsedRows.length}</b> nomor siap diblast.`;
+  updateStartBtn();
+});
+
+let watzapEnabled = false;
+function updateStartBtn(enabled) {
+  if (enabled !== undefined) watzapEnabled = enabled;
+  $('#startBtn').disabled = !(watzapEnabled && parsedRows.length > 0);
+}
+
+$('#startBtn').addEventListener('click', async () => {
+  const f = $('#csvFile').files[0];
+  if (!f) return;
+  if (!confirm(`Kirim broadcast Watzap ke ${parsedRows.length} nomor sebagai ${me ? me.email : ''}?\n\nDikirim via gateway watzap.id. Jeda ${$('#minDelay').value}–${$('#maxDelay').value} detik antar nomor.`)) return;
+  const fd = new FormData();
+  fd.append('csv', f);
+  fd.append('min_delay', $('#minDelay').value);
+  fd.append('max_delay', $('#maxDelay').value);
+  $('#startBtn').disabled = true; $('#startBtn').textContent = 'Mengirim…';
+  try {
+    const r = await apiFetch('/api/watzap/blast', { method:'POST', body: fd });
+    if (!r.ok) { alert('Gagal mulai blast: ' + await r.text()); return; }
+    const d = await r.json();
+    switchTab('progress');
+    pollProgress();
+  } catch (e) { alert('Error: ' + e.message); }
+  finally { $('#startBtn').textContent = 'Mulai Blast Watzap'; }
+});
+
+$('#cancelBtn').addEventListener('click', () => {
+  $('#progTable tbody').innerHTML = '';
+  ['sTotal','sSent','sFailed','sPending'].forEach(id => $('#'+id).textContent = '0');
+  $('#cancelBtn').style.display = 'none';
+  $('#csvFile').value = ''; parsedRows = []; $('#csvInfo').textContent = ''; updateStartBtn();
+});
+
+// ---- tabs ----
+function switchTab(name) {
+  $$('.tab').forEach(x => x.classList.toggle('active', x.dataset.tab === name));
+  $$('.tab-pane').forEach(x => x.classList.toggle('active', x.dataset.pane === name));
+  if (name === 'history') loadHistory();
+}
+$$('.tab').forEach(t => t.addEventListener('click', () => switchTab(t.dataset.tab)));
+$('#refreshHistory').addEventListener('click', loadHistory);
+
+// ---- progress ----
+async function tickProgress() {
+  let r;
+  try { r = await apiFetch('/api/watzap/progress').then(res => res.json()); } catch (e) { return; }
+  if (!r.job) { stopProgress(); return; }
+  const j = r.job;
+  $('#sTotal').textContent = j.total;
+  $('#sSent').textContent = j.sent;
+  $('#sFailed').textContent = j.failed;
+  $('#sPending').textContent = j.total - j.sent - j.failed - j.skipped;
+  const tb = $('#progTable tbody'); tb.innerHTML = '';
+  (j.items||[]).forEach((it,i) => {
+    const cls = { pending:'b-pending', sent:'b-sent', failed:'b-failed', skipped:'b-skipped' }[it.status] || 'b-pending';
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${i+1}</td><td>${esc(it.phone)}</td><td>${esc(it.nama_outlet||'')}</td><td>${esc(it.nomer_invoice||'')}</td>`
+      + `<td><span class="badge ${cls}">${esc(it.status)}</span></td>`
+      + `<td class="truncate" title="${esc(it.message||it.error||'')}">${it.error ? '<span class="err">'+esc(it.error)+'</span>' : esc((it.message||'').slice(0,80))}</td>`
+      + `<td>${it.sent_at ? new Date(it.sent_at).toLocaleTimeString() : ''}</td>`;
+    tb.appendChild(tr);
+  });
+  if (j.running) { $('#startBtn').disabled = true; $('#cancelBtn').style.display = 'none'; }
+  else { stopProgress(); $('#cancelBtn').style.display = ''; updateStartBtn(); loadHistory(); }
+}
+function pollProgress() { if (progTimer) return; tickProgress(); progTimer = setInterval(tickProgress, 2500); }
+function stopProgress() { if (progTimer) { clearInterval(progTimer); progTimer = null; } }
+
+// ---- history ----
+async function loadHistory() {
+  try {
+    const r = await apiFetch('/api/watzap/history').then(res => res.json());
+    const tb = $('#historyTable tbody'); tb.innerHTML = '';
+    (r.logs || []).forEach(l => {
+      const isYou = me && l.user_email === me.email;
+      const dur = (l.started_at && l.ended_at) ? Math.round((new Date(l.ended_at)-new Date(l.started_at))/1000)+' s'
+        : (l.ended_at ? '' : '<em style="color:var(--warn)">running</em>');
+      const tr = document.createElement('tr'); tr.className = 'history-row';
+      tr.innerHTML = `<td>${esc(new Date(l.started_at).toLocaleString())}</td>`
+        + `<td>${esc(l.user_name||l.user_email)}${isYou?'<span class="you-tag">you</span>':''}</td>`
+        + `<td>${l.total}</td><td style="color:var(--lime)">${l.sent}</td><td style="color:#fecaca">${l.failed}</td>`
+        + `<td>${dur}</td><td class="truncate" title="${esc(l.template)}">${esc((l.template||'').slice(0,60))}</td>`;
+      tb.appendChild(tr);
+    });
+    if (!r.logs || !r.logs.length) tb.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:20px">Belum ada riwayat blast Watzap.</td></tr>';
+  } catch (e) {}
+}
+
+$('#appLogout').addEventListener('click', async () => {
+  await apiFetch('/auth/logout', { method:'POST' }).catch(()=>{});
+  location.href = 'login.html';
+});
+
+loadMe().then(() => { loadStatus(); loadTemplate(); tickProgress(); });
+</script>
+</body>
+</html>

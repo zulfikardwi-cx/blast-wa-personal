@@ -194,15 +194,16 @@ func closeStaleRunningBlasts() {
 	for _, t := range []struct{ logs, recv string }{
 		{"blast_logs", "blast_recipients"},
 		{"zopoz_blast_logs", "zopoz_blast_recipients"},
+		{"watzap_blast_logs", "watzap_blast_recipients"},
 	} {
 		res, err := auditDB.Exec(`UPDATE ` + t.logs + ` SET
 			sent = (SELECT COUNT(*) FROM ` + t.recv + ` r WHERE r.blast_log_id = ` + t.logs + `.id AND r.status='sent'),
 			failed = (SELECT COUNT(*) FROM ` + t.recv + ` r WHERE r.blast_log_id = ` + t.logs + `.id AND r.status LIKE 'failed%'),
 			ended_at = COALESCE(
-				(SELECT MAX(COALESCE(r.sent_at, r.created_at)) FROM ` + t.recv + ` r WHERE r.blast_log_id = ` + t.logs + `.id),
-				started_at,
+				NULLIF((SELECT MAX(COALESCE(NULLIF(r.sent_at,''), r.created_at)) FROM ` + t.recv + ` r WHERE r.blast_log_id = ` + t.logs + `.id), ''),
+				NULLIF(started_at, ''),
 				datetime('now'))
-			WHERE ended_at IS NULL`)
+			WHERE ended_at IS NULL OR ended_at = ''`)
 		if err != nil {
 			// zopoz_blast_logs mungkin belum ada di DB lama — abaikan.
 			if !strings.Contains(err.Error(), "no such table") {
