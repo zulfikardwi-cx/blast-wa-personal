@@ -70,6 +70,7 @@ func main() {
 	if err := initResolvedInvoices(); err != nil {
 		log.Fatalf("resolved invoices: %v", err)
 	}
+	closeStaleRunningBlasts()
 	startRetryScheduler()
 	startZopozRetryScheduler()
 

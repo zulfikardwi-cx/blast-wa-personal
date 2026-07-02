@@ -185,5 +185,36 @@ func handleHistory(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"logs": out})
 }
 
+// closeStaleRunningBlasts — saat startup, tutup entri blast yang ended_at-nya masih NULL.
+// Job blast murni in-memory (tidak ada resume), jadi setelah proses restart tak mungkin ada
+// blast yang benar-benar berjalan. Tanpa ini, blast yang ke-kill saat restart (mis. WA
+// logout di tengah blast) akan tampil "running" selamanya di Riwayat DAN menipu safety-check
+// "ada blast berjalan?" (ended_at IS NULL). sent/failed di-rekap dari recipients. Idempoten.
+func closeStaleRunningBlasts() {
+	for _, t := range []struct{ logs, recv string }{
+		{"blast_logs", "blast_recipients"},
+		{"zopoz_blast_logs", "zopoz_blast_recipients"},
+	} {
+		res, err := auditDB.Exec(`UPDATE ` + t.logs + ` SET
+			sent = (SELECT COUNT(*) FROM ` + t.recv + ` r WHERE r.blast_log_id = ` + t.logs + `.id AND r.status='sent'),
+			failed = (SELECT COUNT(*) FROM ` + t.recv + ` r WHERE r.blast_log_id = ` + t.logs + `.id AND r.status LIKE 'failed%'),
+			ended_at = COALESCE(
+				(SELECT MAX(COALESCE(r.sent_at, r.created_at)) FROM ` + t.recv + ` r WHERE r.blast_log_id = ` + t.logs + `.id),
+				started_at,
+				datetime('now'))
+			WHERE ended_at IS NULL`)
+		if err != nil {
+			// zopoz_blast_logs mungkin belum ada di DB lama — abaikan.
+			if !strings.Contains(err.Error(), "no such table") {
+				fmt.Println("warn: closeStaleRunningBlasts", t.logs, ":", err)
+			}
+			continue
+		}
+		if n, _ := res.RowsAffected(); n > 0 {
+			fmt.Printf("startup: %d entri %s 'running' basi ditutup\n", n, t.logs)
+		}
+	}
+}
+
 // suppress unused
 var _ = fmt.Sprintf
