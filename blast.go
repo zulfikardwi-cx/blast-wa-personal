@@ -275,10 +275,11 @@ func runBlast(ctx context.Context, job *BlastJob) {
 		rec.Message = msg
 		job.mu.Unlock()
 
-		if err := sendOne(rec.Phone, msg); err != nil {
+		sendErr := sendOne(rec.Phone, msg)
+		if sendErr != nil {
 			job.mu.Lock()
 			rec.Status = "failed"
-			rec.Error = err.Error()
+			rec.Error = sendErr.Error()
 			job.Failed++
 			job.mu.Unlock()
 		} else {
@@ -306,7 +307,12 @@ func runBlast(ctx context.Context, job *BlastJob) {
 		} else if rec.Status == "failed" {
 			// Attempt 1 gagal kirim → tandai thread 'rejected' supaya muncul di Log Status
 			// Update (Attempt 1 = "Rejected", kolom Rejected = "reject") utk di-reject tim WO.
-			if err := upsertThreadBlastFailed(rec.Phone, rec.NamaOutlet, rec.NomerInv, job.auditID, rec.Error, time.Now()); err != nil {
+			// TAPI kalau gagalnya karena koneksi WA putus/logout (bukan nomor invalid),
+			// JANGAN tandai rejected — nomornya valid, cuma gagal transport; biarkan bisa
+			// di-blast ulang bersih. (mis. saat WA "device removed" di tengah blast.)
+			if isConnLostErr(sendErr) {
+				fmt.Println("info: gagal kirim karena koneksi WA putus (tidak di-reject):", rec.Phone, "-", rec.Error)
+			} else if err := upsertThreadBlastFailed(rec.Phone, rec.NamaOutlet, rec.NomerInv, job.auditID, rec.Error, time.Now()); err != nil {
 				fmt.Println("warn: upsertThreadBlastFailed:", err)
 			}
 		}
@@ -319,6 +325,26 @@ func runBlast(ctx context.Context, job *BlastJob) {
 			}
 		}
 	}
+}
+
+// isConnLostErr — true kalau kegagalan kirim disebabkan koneksi WA putus/logout/timeout
+// (BUKAN nomor tidak terdaftar). Dipakai supaya kegagalan transport di tengah blast tidak
+// salah menandai nomor valid sebagai 'rejected'. Pola error di-cek lowercase; juga true
+// kalau client memang sedang tidak login (mis. habis "device removed").
+func isConnLostErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if state.client == nil || !state.client.IsLoggedIn() {
+		return true
+	}
+	s := strings.ToLower(err.Error())
+	for _, k := range []string{"usync", "websocket", "not connected", "not logged in", "logged out", "close sent", "eof", "connection reset", "broken pipe", "context deadline", "disconnect"} {
+		if strings.Contains(s, k) {
+			return true
+		}
+	}
+	return false
 }
 
 func sendOne(phone, body string) error {
