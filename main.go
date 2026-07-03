@@ -70,6 +70,10 @@ func main() {
 	if err := initResolvedInvoices(); err != nil {
 		log.Fatalf("resolved invoices: %v", err)
 	}
+	// Token validasi (korelasi balasan INTI ↔ invoice yang di-blast dari BLASTER).
+	if err := initTokens(); err != nil {
+		log.Fatalf("tokens: %v", err)
+	}
 	closeStaleRunningBlasts()
 	startRetryScheduler()
 	startZopozRetryScheduler()
@@ -121,6 +125,12 @@ func main() {
 		log.Printf("zopoz client init gagal (fitur Zopoz mati, blast/inbox utama tetap jalan): %v", err)
 	}
 
+	// BLASTER: client WA disposable khusus pengirim blast (session/store-blaster.db).
+	// Non-fatal — kalau gagal, Inbox INTI tetap jalan (cuma blast yang butuh scan QR blaster).
+	if err := initBlasterClient(rootCtx); err != nil {
+		log.Printf("blaster client init gagal (blast mati sampai QR blaster di-scan, Inbox INTI tetap jalan): %v", err)
+	}
+
 	mux := http.NewServeMux()
 
 	// Public auth routes
@@ -168,12 +178,18 @@ func main() {
 	mux.HandleFunc("/api/inbox/messages", corsMiddleware(requireAuth(handleMessages)))
 	mux.HandleFunc("/api/inbox/read", corsMiddleware(requireAuth(handleMarkRead)))
 	mux.HandleFunc("/api/inbox/status", corsMiddleware(requireAuth(handleSetStatus)))
+	mux.HandleFunc("/api/inbox/match-token", corsMiddleware(requireAuth(handleMatchToken)))
 	mux.HandleFunc("/api/inbox/reply", corsMiddleware(requireAuth(handleReply)))
 	mux.HandleFunc("/api/inbox/resolve", corsMiddleware(requireAuth(handleResolve)))
 	mux.HandleFunc("/api/inbox/sync-teams", corsMiddleware(requireAuth(handleSyncTeams)))
 	// Media file — TANPA requireAuth (di-load via <img>/<video> lintas-domain), diproteksi
 	// token HMAC di query string (?id=&t=). Lihat media.go.
 	mux.HandleFunc("/api/inbox/media", handleInboxMedia)
+
+	// Blaster (nomor disposable pengirim blast) — status/QR/logout(ganti nomor)
+	mux.HandleFunc("/api/blaster/wa-status", corsMiddleware(requireAuth(blasterHandleStatus)))
+	mux.HandleFunc("/api/blaster/qr", corsMiddleware(requireAuth(blasterHandleQR)))
+	mux.HandleFunc("/api/blaster/wa-logout", corsMiddleware(requireAuth(blasterHandleLogout)))
 
 	// ---- Zopoz (line WA kedua) — namespace /api/zopoz/* terpisah total ----
 	mux.HandleFunc("/api/zopoz/wa-status", corsMiddleware(requireAuth(zopozHandleStatus)))
@@ -358,40 +374,84 @@ func handleIncomingWA(e *events.Message) {
 		return
 	}
 
-	// Resolve phone — handle LID (Linked Identity, sistem privacy WA terbaru)
-	phone := resolveSenderPhone(e.Info)
-	if phone == "" {
-		log.Printf("  → skipped: tidak bisa resolve phone dari sender=%s alt=%s",
-			e.Info.Sender.String(), e.Info.SenderAlt.String())
-		return
-	}
-	if !isPhoneBlasted(phone) {
-		log.Println("  → skipped: phone", phone, "tidak ada di chat_threads (belum pernah di-blast)")
-		return
-	}
-	// Unwrap pembungkus (view-once/ephemeral/device-sent) dulu supaya media di dalamnya
-	// terdeteksi. eff dipakai utk extract DAN download (DownloadAny butuh pesan yg benar).
+	// Resolve nomor pengirim asli (bisa "" kalau LID belum ter-mapping ke phone).
+	senderPhone := resolveSenderPhone(e.Info)
+
+	// Unwrap pembungkus (view-once/ephemeral/device-sent) dulu supaya TOKEN & media di
+	// dalamnya terdeteksi. eff dipakai utk extract DAN download (DownloadAny butuh pesan benar).
 	eff := unwrapMessage(e.Message)
 	body, mediaType := extractTextFromMessage(eff)
 	// Pesan kontrol/protokol WA (EPHEMERAL_SYNC_RESPONSE, revoke, reaction, dsb.) BUKAN
 	// isi chat dari customer. Jangan dicatat / dimunculkan ("[Pesan tidak didukung]") dan
 	// jangan geser thread ke Open / tambah unread. Skip total.
 	if mediaType == "unknown" || (body == "" && mediaType == "") {
-		log.Printf("  → skip: pesan kontrol/tidak didukung from=%s id=%s raw: %.200s", phone, e.Info.ID, eff.String())
+		log.Printf("  → skip: pesan kontrol/tidak didukung from=%s id=%s raw: %.200s", senderPhone, e.Info.ID, eff.String())
 		return
 	}
+
+	if senderPhone == "" {
+		log.Printf("  → skipped: tak bisa resolve nomor pengirim (sender=%s alt=%s)",
+			e.Info.Sender.String(), e.Info.SenderAlt.String())
+		return
+	}
+
+	// Sudah ada thread 'inbound_non_blast' (chat manual yang belum dicocokkan agent) untuk
+	// nomor ini? Tetap di bucket itu — jangan promosikan ke Open sebelum Kode Referensi cocok.
+	if threadStatus(senderPhone) == "inbound_non_blast" {
+		if err := recordChatMessage(senderPhone, "in", body, mediaType, e.Info.ID, e.Info.Timestamp, 0, "", ""); err != nil {
+			log.Println("warn: recordChatMessage inbound_non_blast:", err)
+		}
+		if err := upsertThreadInboundNonBlast(senderPhone, body, e.Info.Timestamp); err != nil {
+			log.Println("warn: upsertThreadInboundNonBlast:", err)
+		}
+		if isDownloadableMedia(mediaType) {
+			go downloadAndStoreMedia(e.Info.ID, eff, mediaType)
+		}
+		log.Println("  → inbound_non_blast (belum dicocokkan) from", senderPhone, "—", truncate(body, 40))
+		return
+	}
+
+	// Arsitektur 2-nomor: pesan ini masuk ke INTI dari pelanggan yang di-blast oleh nomor
+	// BLASTER. Kaitkan ke invoice via TOKEN (baris "Kode Referensi") lebih dulu, fallback ke
+	// nomor pengirim kalau token hilang/diedit. phone = canonical (key thread = nomor yang
+	// di-blast).
+	phone, ok := resolveInboundThread(body, senderPhone)
+	if !ok {
+		// Tak bisa dikaitkan ke invoice (chat manual dari nomor tak dikenal, tanpa Kode
+		// Referensi valid) → TAMPUNG di bucket 'inbound_non_blast' (bukan di-skip). Agent akan
+		// minta Kode Referensi lalu cocokkan (handleMatchToken).
+		if err := recordChatMessage(senderPhone, "in", body, mediaType, e.Info.ID, e.Info.Timestamp, 0, "", ""); err != nil {
+			log.Println("warn: recordChatMessage inbound_non_blast:", err)
+		}
+		if err := upsertThreadInboundNonBlast(senderPhone, body, e.Info.Timestamp); err != nil {
+			log.Println("warn: upsertThreadInboundNonBlast:", err)
+		}
+		if isDownloadableMedia(mediaType) {
+			go downloadAndStoreMedia(e.Info.ID, eff, mediaType)
+		}
+		log.Printf("  → inbound_non_blast (baru) from %s token=%q — %s", senderPhone, parseTokenFromBody(body), truncate(body, 40))
+		return
+	}
+
 	if err := recordChatMessage(phone, "in", body, mediaType, e.Info.ID, e.Info.Timestamp, 0, "", ""); err != nil {
 		log.Println("warn: recordChatMessage incoming:", err)
 	}
 	if err := upsertThreadIncoming(phone, body, e.Info.Timestamp); err != nil {
 		log.Println("warn: upsertThreadIncoming:", err)
 	}
+	// Pelanggan chat dari nomor BEDA dari yang di-blast (dikaitkan via token) → simpan JID
+	// pengirim asli supaya balasan agent terkirim ke nomor itu, bukan nomor yang di-blast.
+	if senderPhone != "" && senderPhone != phone {
+		if err := setThreadReplyJID(phone, senderPhone); err != nil {
+			log.Println("warn: setThreadReplyJID:", err)
+		}
+	}
 	// Media (gambar/video/audio/stiker/dokumen) → unduh & simpan async supaya bisa
 	// ditampilkan di chatbox. Jangan blok event handler.
 	if isDownloadableMedia(mediaType) {
 		go downloadAndStoreMedia(e.Info.ID, eff, mediaType)
 	}
-	log.Println("  → inbox: incoming from", phone, "—", truncate(body, 40))
+	log.Println("  → inbox: incoming from", senderPhone, "→ thread", phone, "—", truncate(body, 40))
 }
 
 func serveLogin(w http.ResponseWriter, r *http.Request) {

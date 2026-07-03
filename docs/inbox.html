@@ -65,6 +65,7 @@
   .dot.on_going{background:#a78bfa}
   .dot.scheduled{background:#22d3ee}
   .dot.force_close{background:#64748b}
+  .dot.inbound_non_blast{background:#f472b6}
 
   .user-card{margin-top:auto;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px;font-size:11px;color:var(--muted)}
   .user-card b{color:var(--text);display:block;font-size:12px;font-weight:600}
@@ -101,6 +102,7 @@
   .status-tag.invalid{background:rgba(239,68,68,.2);color:var(--danger)}
   .status-tag.on_going{background:rgba(167,139,250,.2);color:#a78bfa}
   .status-tag.force_close{background:rgba(100,116,139,.2);color:#94a3b8}
+  .status-tag.inbound_non_blast{background:rgba(244,114,182,.2);color:#f472b6}
   .thread-item .team-tag{display:inline-block;font-size:9px;padding:1px 7px;border-radius:8px;margin-top:6px;margin-left:6px;font-weight:600;background:rgba(45,189,182,.18);color:var(--teal);text-transform:uppercase;letter-spacing:.3px}
   .thread-item .unread{background:var(--lime);color:#0b1220;font-size:10px;font-weight:600;padding:1px 6px;border-radius:8px;position:absolute;top:14px;right:18px}
   .empty{padding:60px 20px;text-align:center;color:var(--muted);font-size:13px}
@@ -218,6 +220,11 @@
       <span class="name">After Blast</span>
       <span class="count" id="cAfterBlast">0</span>
     </button>
+    <button class="bucket-btn" data-bucket="inbound_non_blast">
+      <span class="dot inbound_non_blast"></span>
+      <span class="name">Inbound non Blast</span>
+      <span class="count" id="cNonBlast">0</span>
+    </button>
     <button class="bucket-btn" data-bucket="open">
       <span class="dot open"></span>
       <span class="name">Open</span>
@@ -288,7 +295,7 @@
     <div id="chatEmpty" class="no-thread">
       <div class="icon">💬</div>
       <div>Pilih thread di kiri untuk lihat percakapan</div>
-      <div style="font-size:11px">Hanya nomor yang sudah di-blast yang muncul.<br />Reply akan masuk otomatis ke sini.</div>
+      <div style="font-size:11px">Balasan dari nomor yang di-blast + chat manual (bucket Inbound non Blast) masuk ke sini.</div>
     </div>
 
     <div id="chatContent" style="display:none;flex-direction:column;flex:1;overflow:hidden">
@@ -311,6 +318,14 @@
       </div>
 
       <div class="messages" id="messages"></div>
+
+      <div id="matchBar" style="display:none;padding:12px 20px;border-top:1px solid var(--line);background:rgba(244,114,182,.08)">
+        <div style="font-size:12px;color:#f472b6;margin-bottom:8px">🔗 <b>Inbound non-Blast</b> — chat manual belum terkait invoice. Minta <b>Kode Referensi</b> ke customer, lalu cocokkan:</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input id="matchCode" placeholder="Kode Referensi (mis. ABCD2345)" style="flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 12px;font:13px inherit;text-transform:uppercase">
+          <button id="matchBtn" style="background:#f472b6;color:#3b0a24;border:0;padding:9px 18px;border-radius:8px;cursor:pointer;font-weight:600">Cocokkan</button>
+        </div>
+      </div>
 
       <div class="reply-box" id="replyBox">
         <div class="macro-wrap">
@@ -382,7 +397,7 @@ function renderMsgBody(m) {
 function showApiErr(msg) { $('#apiErrBanner').textContent = msg; $('#apiErrBanner').style.display = 'block'; }
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 2500); }
 
-const bucketLabels = { after_blast:'After Blast', open:'Open', in_progress:'In Progress', on_going:'On Going', scheduled:'Scheduled', force_close:'Force Close', done:'Done', invalid:'Invalid' };
+const bucketLabels = { after_blast:'After Blast', inbound_non_blast:'Inbound non Blast', open:'Open', in_progress:'In Progress', on_going:'On Going', scheduled:'Scheduled', force_close:'Force Close', done:'Done', invalid:'Invalid' };
 
 async function loadMe() {
   try {
@@ -419,6 +434,7 @@ async function loadThreads() {
   try {
     const r = await apiFetch(`/api/inbox/threads?status=${currentBucket}`).then(r => r.json());
     $('#cAfterBlast').textContent = r.counts.after_blast || 0;
+    $('#cNonBlast').textContent = r.counts.inbound_non_blast || 0;
     $('#cOpen').textContent = r.counts.open || 0;
     $('#cProg').textContent = r.counts.in_progress || 0;
     $('#cOnGoing').textContent = r.counts.on_going || 0;
@@ -548,6 +564,9 @@ async function loadMessages(scrollBottom) {
       $('#replyText').placeholder = scheduled ? 'Dijadwalkan validasi lain hari. Tulis balasan...'
         : (ongoing ? 'Sedang divalidasi (On Going). Tulis balasan...' : 'Tulis balasan...');
     }
+
+    // Bucket inbound_non_blast → tampilkan bar "Cocokkan Kode Referensi".
+    $('#matchBar').style.display = (r.status === 'inbound_non_blast') ? 'block' : 'none';
 
     const msgs = r.messages || [];
     const newMaxID = msgs.length ? msgs[msgs.length-1].id : 0;
@@ -739,6 +758,28 @@ $('#macroBtn').addEventListener('click', (e) => {
 document.addEventListener('click', (e) => {
   if (!e.target.closest('.macro-wrap')) $('#macroMenu').style.display = 'none';
 });
+
+// Cocokkan Kode Referensi (bucket inbound_non_blast) → tautkan chat manual ke invoice.
+$('#matchBtn').addEventListener('click', matchToken);
+$('#matchCode').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); matchToken(); } });
+
+async function matchToken() {
+  const code = ($('#matchCode').value || '').trim();
+  if (!code || !currentPhone) return;
+  const btn = $('#matchBtn');
+  btn.disabled = true; btn.textContent = '...';
+  try {
+    const fd = new FormData(); fd.append('code', code);
+    const r = await apiFetch(`/api/inbox/match-token?phone=${encodeURIComponent(currentPhone)}`, { method: 'POST', body: fd });
+    if (!r.ok) { alert('Gagal cocokkan: ' + await r.text()); return; }
+    const d = await r.json();
+    $('#matchCode').value = '';
+    toast(`✅ Terkait ke invoice ${d.nomer_invoice || ''} (${d.nama_outlet || ''}). Thread → In Progress.`);
+    await loadMessages(false);
+    loadThreads();
+  } catch (e) { alert('Error: ' + e); }
+  finally { btn.disabled = false; btn.textContent = 'Cocokkan'; }
+}
 
 // Reply
 $('#sendBtn').addEventListener('click', sendReply);

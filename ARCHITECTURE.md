@@ -49,9 +49,21 @@ Alur bisnis singkat:
               https://blastvalidasi.cxmajoo.my.id  (public, same-origin cookie)
 ```
 
-**Dua "suite" (channel) paralel & independen:**
-- **majoo** — nomor WA utama. Tabel: `chat_threads`, `chat_messages`, `blast_logs`, `blast_recipients`.
-- **Zopoz** — nomor WA kedua, fully isolated. Tabel `zopoz_*`. Kode di file `zopoz_*.go`. Logika mirror majoo.
+**Suite majoo sekarang MODEL 2-NOMOR (blast dipisah dari inbox):**
+- **INTI** (`state.client`, `session/store.db`) — nomor majoo existing = **inbound-only**. Pegang
+  Inbox + balas + Done. TIDAK pernah blast. Balasan dikirim dari sini.
+- **BLASTER** (`blasterState.client`, `session/store-blaster.db`, file `blaster.go`) — nomor
+  **disposable** = **outbound-only**. Semua blast (Attempt 1/2/3) dikirim dari sini (`sendOne`,
+  `sendRetryOne`). Kena banned → logout (tombol "Ganti Nomor Blaster" / `/api/blaster/wa-logout`)
+  → scan QR nomor pengganti; INTI tidak terganggu.
+- **Korelasi balasan → invoice** lewat **token** (`validation_tokens`, file `tokens.go`): pesan
+  blast membawa link `wa.me/<INTI>?text=...Kode Referensi : <token>`. Inbound di INTI di-resolve
+  via token (`resolveInboundThread`), fallback nomor HP. Token di-mark **used saat Done**.
+  Tabel majoo (`chat_threads`, `blast_logs`, `blast_recipients`) DIPAKAI BERSAMA kedua client
+  (blaster nulis blast + pre-create thread; INTI nulis inbox). Kalau pelanggan chat dari nomor
+  beda, JID pengirim disimpan di `chat_threads.wa_jid` (reply routing).
+- **Zopoz** — nomor WA ketiga, fully isolated (TIDAK ikut model 2-nomor). Tabel `zopoz_*`. Kode
+  `zopoz_*.go`. Logika mirror majoo lama (blast+inbox 1 nomor).
 - (Pernah ada channel **watzap** — sudah **di-revert total** 2026-07-02, lihat §12.)
 
 ---
@@ -63,7 +75,9 @@ Alur bisnis singkat:
 | `main.go` | Bootstrap: init semua subsistem (urutan penting), daftar **route table**, start HTTP server + retry schedulers, graceful shutdown. |
 | `auth.go` | Login email+password (bcrypt), session cookie HMAC, `requireAuth`/`corsMiddleware`, ganti password, (OAuth opsional). |
 | `users.go` | Tabel `app_users`; seed roster dari `APP_LOGIN_EMAILS` (default password `admin123`). `userFromCtx`. |
-| `blast.go` | **Blast majoo Attempt 1**: `BlastJob`/`RecipientStatus`, `handleBlast`, `runBlast`, `sendOne` (whatsmeow), `parseCSV`, `normalizePhone`, `renderTemplate`. Guard: abort setelah 3× error 463 (`is463Err`); reject HANYA kalau `isInvalidNumberErr` (nomor tidak terdaftar). |
+| `blast.go` | **Blast majoo Attempt 1**: `BlastJob`/`RecipientStatus`, `handleBlast`, `runBlast`, `sendOne` (kirim via **blasterState.client**), `parseCSV`, `normalizePhone`, `renderTemplate`, `resolveToLID(ctx, client, jid)`. Guard: abort setelah 3× error 463 (`is463Err`); reject HANYA kalau `isInvalidNumberErr` (nomor tidak terdaftar). |
+| `blaster.go` | **Client BLASTER** (nomor disposable pengirim blast). Mirror scaffolding `zopoz.go`: `blasterState`, `initBlasterClient` (store terpisah, event handler TANPA `events.Message`, auto re-pair saat logout), `blasterHandleStatus/QR/Logout`. |
+| `tokens.go` | **Layer token validasi**: tabel `validation_tokens`, `getOrCreateToken`, `buildTriggerLink`/`intiNumber` (link wa.me ke INTI), `applyLink` (substitusi `{{link}}`), `lookupToken`/`resolveInboundThread` (korelasi inbound), `parseTokenFromBody`, `markTokenUsed`. |
 | `chat.go` | **Inbox majoo**: tabel `chat_threads`/`chat_messages`, **state machine status**, upsert thread (blast/incoming/agent reply/failed), handler threads/messages/read/status/reply/resolve, template Attempt 1/2/3 + closing, `backfillFailedThreads`, `initChat`. |
 | `retry.go` | **Scheduler retry Attempt 2/3 majoo** (cron harian jam `RETRY_HOUR`), force-close sweep, handler `retry/preview` `run-now`. |
 | `retry_invoice.go` | Helper retry **PER (phone, invoice)** dipakai bersama majoo & Zopoz: `collectInvoiceRetries`, `invoiceStillNeedsRetry`, `phoneHasPendingInvoice`, `bumpThreadAfterRetry`. |
@@ -87,6 +101,7 @@ Alur bisnis singkat:
 - `chat_messages(id, phone, direction[in/out], body, is_media, media_type, media_path, wa_message_id, timestamp, blast_log_id, sender_email, sender_name, created_at)` — histori chat inbox.
 - `resolved_invoices(suite, phone, nomer_invoice, nama_outlet, resolver_email, resolver_name, resolved_at, PK(suite,phone,nomer_invoice))` — SET invoice yang sudah Done (permanen, tahan re-blast). Sumber Report Resolved + exclude retry.
 - `excluded_invoices(suite, phone, nomer_invoice, excluded_by, excluded_at, PK(suite,phone,nomer_invoice))` — exclude manual.
+- `validation_tokens(token PK, phone, nomer_invoice, nama_outlet, status['pending'|'used'], created_at, used_at, UNIQUE(phone,nomer_invoice))` — token korelasi balasan↔invoice (model 2-nomor). 1 token per (phone,invoice), di-reuse lintas attempt. `status='used'` di-set saat Done. Kolom baru `chat_threads.wa_jid` = JID pengirim asli kalau pelanggan chat dari nomor beda dari yang di-blast.
 - `app_users(email PK, pass_hash, must_change, ...)` — akun login.
 
 **Zopoz:** `zopoz_threads`, `zopoz_messages`, `zopoz_blast_logs`, `zopoz_blast_recipients` (skema sama). `excluded_invoices`/`resolved_invoices` dipakai bersama via kolom `suite` (namun resolved_invoices saat ini HANYA diisi majoo).
@@ -162,6 +177,7 @@ Alur bisnis singkat:
 **Retry:** `/api/retry/{preview,run-now,exclude,include,excluded}`
 **Report:** `/api/report/{unresponsive,unresponsive.csv,export-sheet,resolved,resolved.csv,resolved/export-sheet}`
 **Inbox:** `/api/inbox/{threads,messages,read,status,reply,resolve,sync-teams,media}`
+**Blaster:** `/api/blaster/{wa-status,qr,wa-logout}` (koneksi nomor disposable pengirim blast; `wa-logout` = ganti nomor). Blast/retry (`/api/blast`, `/api/retry/*`) kini cek koneksi & kirim via BLASTER, bukan INTI.
 **Zopoz:** `/api/zopoz/*` (mirror: wa-status,qr,wa-logout,templates,blast,progress,history,sheet-status,export-sheet,retry/*,report/*,threads,messages,read,status,reply,media)
 **Static:** `/` → `docs/`
 

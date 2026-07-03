@@ -74,9 +74,17 @@ func handleBlast(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "POST only", 405)
 		return
 	}
-	_, loggedIn, connected := state.snapshot()
+	// Blast dikirim dari nomor BLASTER (disposable), bukan INTI. Cek koneksi blaster.
+	_, loggedIn, connected := blasterState.snapshot()
 	if !loggedIn || !connected {
-		httpErr(w, 400, "WhatsApp belum terhubung. Scan QR dulu.")
+		httpErr(w, 400, "Nomor Blaster belum terhubung. Scan QR Blaster dulu.")
+		return
+	}
+	// Link wa.me di pesan menunjuk ke nomor INTI. Kalau INTI belum diketahui (INTI belum login
+	// & INTI_WA_NUMBER kosong), pesan akan terkirim TANPA link → pelanggan tak bisa menghubungi.
+	// Tolak lebih dulu supaya tidak ada blast sia-sia.
+	if intiNumber() == "" {
+		httpErr(w, 400, "Nomor Inti belum diketahui — login WhatsApp Inti dulu atau set INTI_WA_NUMBER di .env. Link validasi tidak bisa dibuat.")
 		return
 	}
 	if state.job != nil && state.job.Running {
@@ -278,6 +286,8 @@ func runBlast(ctx context.Context, job *BlastJob) {
 		}
 
 		msg := renderTemplate(job.Template, rec)
+		// Sisipkan link wa.me ke INTI + token (per phone,invoice). Token di-reuse utk attempt 2/3.
+		msg = applyLink(msg, rec.Phone, rec.NomerInv, rec.NamaOutlet)
 		job.mu.Lock()
 		rec.Message = msg
 		job.mu.Unlock()
@@ -377,14 +387,20 @@ func is463Err(err error) bool {
 	return strings.Contains(err.Error(), "463")
 }
 
+// sendOne — kirim satu pesan blast DARI NOMOR BLASTER (bukan INTI). Semua pemanggilan client
+// di sini pakai blasterState.client supaya risiko ban terlokalisir ke nomor disposable.
 func sendOne(phone, body string) error {
+	client := blasterState.client
+	if client == nil {
+		return fmt.Errorf("blaster client belum siap")
+	}
 	jid := types.NewJID(phone, types.DefaultUserServer)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
 
 	// 1) cek nomor terdaftar WA
-	res, err := state.client.IsOnWhatsApp(ctx, []string{"+" + phone})
+	res, err := client.IsOnWhatsApp(ctx, []string{"+" + phone})
 	if err != nil {
 		return fmt.Errorf("check: %w", err)
 	}
@@ -393,18 +409,18 @@ func sendOne(phone, body string) error {
 	}
 
 	// 1b) Resolve PN -> LID (lihat resolveToLID). Wajib juga di retry attempt 2/3.
-	jid = resolveToLID(ctx, jid)
+	jid = resolveToLID(ctx, client, jid)
 
 	// 2) pre-fetch device list — bootstrap Signal session ke semua device penerima.
 	// Tanpa ini, kirim pertama ke nomor baru bisa "Waiting for this message" karena
 	// session belum ter-establish. Error di sini non-fatal — coba tetap kirim.
-	if _, e := state.client.GetUserDevicesContext(ctx, []types.JID{jid}); e != nil {
+	if _, e := client.GetUserDevicesContext(ctx, []types.JID{jid}); e != nil {
 		fmt.Println("warn: prefetch devices failed for", phone, ":", e)
 	}
 
 	// 3) kirim
 	msg := &waProto.Message{Conversation: proto.String(body)}
-	_, err = state.client.SendMessage(ctx, jid, msg)
+	_, err = client.SendMessage(ctx, jid, msg)
 	if err != nil {
 		return err
 	}
@@ -417,11 +433,13 @@ func sendOne(phone, body string) error {
 // penerima tidak bisa dekripsi ("Waiting for this message", kosong di HP). Resolve ke
 // JID LID supaya alamat + enkripsi konsisten dan device list lengkap (termasuk primary
 // :0). Return JID asli kalau LID tidak tersedia (nomor lama belum migrasi -> PN aman).
-func resolveToLID(ctx context.Context, jid types.JID) types.JID {
-	if lid, e := state.client.Store.LIDs.GetLIDForPN(ctx, jid); e == nil && !lid.IsEmpty() {
+// resolveToLID — client di-pass eksplisit (blaster utk blast/retry) supaya lookup LID pakai
+// store device yang benar (blast dikirim dari nomor blaster, bukan INTI).
+func resolveToLID(ctx context.Context, client *whatsmeow.Client, jid types.JID) types.JID {
+	if lid, e := client.Store.LIDs.GetLIDForPN(ctx, jid); e == nil && !lid.IsEmpty() {
 		return lid
 	}
-	if info, e := state.client.GetUserInfo(ctx, []types.JID{jid}); e == nil && !info[jid].LID.IsEmpty() {
+	if info, e := client.GetUserInfo(ctx, []types.JID{jid}); e == nil && !info[jid].LID.IsEmpty() {
 		return info[jid].LID
 	}
 	return jid

@@ -129,7 +129,7 @@
     <img id="userAvatar" src="" alt="" />
     <div class="uname"><b id="userName">—</b><small id="userEmail">—</small></div>
   </div>
-  <button id="logoutBtn" class="ghost" style="display:none">Logout WA</button>
+  <button id="logoutBtn" class="ghost" style="display:none">Ganti Nomor Blaster</button>
   <a href="profil.html" class="ghost" style="text-decoration:none">Profil</a>
   <button id="signoutBtn" class="ghost">Sign out</button>
 </header>
@@ -142,9 +142,12 @@
 
 <main>
   <section class="card">
-    <h2>1 · Koneksi WhatsApp</h2>
+    <h2>1 · Koneksi Nomor Blaster</h2>
+    <div class="warn" style="margin-bottom:10px">
+      <strong>Nomor Blaster</strong> = nomor <em>disposable</em> khusus pengirim blast. Balasan pelanggan TIDAK masuk ke sini — pelanggan klik link di pesan lalu chat ke <strong>Nomor Inti</strong> (Inbox). Kalau nomor blaster kena banned, klik <strong>Ganti Nomor Blaster</strong> lalu scan QR nomor pengganti.
+    </div>
     <div id="qrBox">
-      <p style="color:var(--muted);font-size:13px">Scan QR ini di WhatsApp &rsaquo; Linked Devices</p>
+      <p style="color:var(--muted);font-size:13px">Scan QR ini dari HP <strong>nomor blaster</strong> di WhatsApp &rsaquo; Linked Devices</p>
       <img id="qrImg" alt="QR" />
     </div>
     <div id="connInfo" style="color:var(--muted);font-size:13px">Memeriksa status...</div>
@@ -152,7 +155,7 @@
     <h2 style="margin-top:20px">2 · Template Pesan (3 Attempts)</h2>
     <div class="warn">
       <strong>Flow auto-retry:</strong> Attempt 1 dikirim saat blast. Tiap hari jam <span id="retryHours">09</span>:00 WIB, cron memproses antrian <em>Belum Respons</em> (After Blast + In Progress) → auto-kirim Attempt 2, lalu hari berikutnya Attempt 3 (maks 1 attempt/hari per nomor, jeda 20–40 detik antar kirim). <br/>
-      <strong>Setelah Attempt 3 terkirim, retry STOP permanen</strong> (dibalas atau tidak). User reply (status → Open) langsung keluar dari antrian retry.
+      <strong>Setelah Attempt 3 terkirim, retry STOP permanen.</strong> Sebuah invoice juga keluar dari antrian blast begitu divalidasi (thread di-<strong>Done</strong> → token dipakai/used).
     </div>
     <div class="tab-row" style="margin-bottom:8px">
       <button class="tab active" data-tplTab="1">Attempt 1</button>
@@ -162,7 +165,7 @@
     <pre id="tplPreview1" class="preview" style="display:block;min-height:200px;max-height:300px">Memuat...</pre>
     <pre id="tplPreview2" class="preview" style="display:none;min-height:200px;max-height:300px"></pre>
     <pre id="tplPreview3" class="preview" style="display:none;min-height:200px;max-height:300px"></pre>
-    <div class="vars" style="margin-top:8px">Variabel auto-replace: <code>{{nama_outlet}}</code> <code>{{nomer_invoice}}</code></div>
+    <div class="vars" style="margin-top:8px">Variabel auto-replace: <code>{{nama_outlet}}</code> <code>{{nomer_invoice}}</code> <code>{{kode_referensi}}</code> (kode/token di badan pesan) <code>{{link}}</code> (link wa.me ke Nomor Inti berisi token)</div>
 
     <div class="row" style="margin-top:12px">
       <div>
@@ -280,7 +283,7 @@
       </div>
       <div class="scroll"><table id="resolvedTable">
         <thead><tr>
-          <th>Nomor Invoice</th><th>Nama Outlet</th><th>Nomor User</th><th>Nama PIC (Resolved)</th>
+          <th>Nomor Invoice</th><th>Nama Outlet</th><th>Nomor User</th><th>Nama PIC (Resolved)</th><th>Waktu Resolved (WIB)</th>
         </tr></thead>
         <tbody></tbody>
       </table></div>
@@ -347,20 +350,21 @@ async function loadMe() {
 
 async function pollStatus() {
   try {
-    const r = await apiFetch('/api/status');
+    // Blast dikirim dari NOMOR BLASTER (disposable), bukan nomor Inti/Inbox.
+    const r = await apiFetch('/api/blaster/wa-status');
     if (r.status === 401) { location.href = 'login.html'; return; }
     const d = await r.json();
     const pill = $('#connStatus');
     if (d.loggedIn && d.connected) {
-      pill.textContent = 'WA Connected';
+      pill.textContent = 'Blaster Connected';
       pill.className = 'status-pill ok';
       $('#qrBox').style.display = 'none';
-      $('#connInfo').textContent = 'WhatsApp terhubung. Siap blast.';
+      $('#connInfo').textContent = 'Nomor blaster terhubung. Siap blast.';
       $('#logoutBtn').style.display = '';
       updateStartBtn();
     } else if (d.hasQR) {
-      const q = await apiFetch('/api/qr').then(r => r.json());
-      pill.textContent = 'Scan QR';
+      const q = await apiFetch('/api/blaster/qr').then(r => r.json());
+      pill.textContent = 'Scan QR Blaster';
       pill.className = 'status-pill warn';
       $('#qrBox').style.display = 'block';
       $('#qrImg').src = 'https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=' + encodeURIComponent(q.code);
@@ -369,7 +373,7 @@ async function pollStatus() {
     } else {
       pill.textContent = 'Disconnected';
       pill.className = 'status-pill';
-      $('#connInfo').textContent = 'Menghubungkan...';
+      $('#connInfo').textContent = 'Menghubungkan nomor blaster...';
     }
   } catch (e) {
     $('#connStatus').textContent = 'API error';
@@ -469,8 +473,8 @@ $('#startBtn').addEventListener('click', async () => {
 });
 
 $('#logoutBtn').addEventListener('click', async () => {
-  if (!confirm('Logout dari WhatsApp? Sesi akan terhapus dan harus scan QR lagi.')) return;
-  await apiFetch('/api/logout', { method:'POST' });
+  if (!confirm('Ganti nomor blaster? Sesi nomor blaster sekarang akan logout dan QR baru muncul untuk scan nomor pengganti. Nomor Inti / Inbox TIDAK terpengaruh.')) return;
+  await apiFetch('/api/blaster/wa-logout', { method:'POST' });
   location.reload();
 });
 
@@ -825,12 +829,13 @@ async function loadResolved() {
         <td>${esc(row.nomer_invoice)}</td>
         <td>${esc(row.nama_outlet)}</td>
         <td>${esc(row.phone)}</td>
-        <td>${esc(row.pic_name || '-')}${row.pic_email ? `<br><small style="color:var(--muted)">${esc(row.pic_email)}</small>` : ''}</td>`;
+        <td>${esc(row.pic_name || '-')}${row.pic_email ? `<br><small style="color:var(--muted)">${esc(row.pic_email)}</small>` : ''}</td>
+        <td>${esc(row.resolved_at || '-')}</td>`;
       tb.appendChild(tr);
     });
     const n = r.count || 0;
     $('#resolvedCount').textContent = n + ' invoice';
-    if (!n) tb.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:20px">Belum ada invoice yang di-resolve.</td></tr>';
+    if (!n) tb.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px">Belum ada invoice yang di-resolve.</td></tr>';
     $('#resolvedSheetBtn').style.display = (sheetCfg && sheetCfg.enabled) ? '' : 'none';
     $('#resolvedSheetStatus').textContent = (sheetCfg && sheetCfg.enabled) ? '' : 'Sheets export belum aktif';
   } catch (e) { /* ignore */ }

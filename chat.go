@@ -80,6 +80,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_wa_id ON chat_messages(wa_message
 		// Update — mis. "nomor tidak terdaftar di WhatsApp" (Attempt 1 gagal) atau
 		// "Tidak ada respons s/d 16:00 WIB" (Attempt 3).
 		{"reject_reason", "TEXT"},
+		// wa_jid: JID pengirim asli DI INTI kalau pelanggan chat dari nomor BEDA dari nomor
+		// yang di-blast (thread tetap di-key pakai nomor blast/canonical dari token). Reply
+		// dikirim ke wa_jid ini bila terisi. Kosong = balas ke `phone` (kasus umum).
+		{"wa_jid", "TEXT"},
+		// blast_phone: untuk thread 'inbound_non_blast' yang SUDAH dicocokkan agent via Kode
+		// Referensi — nomor ASLI yang di-blast (canonical) yang memiliki invoice tsb. Saat Done,
+		// resolve pakai nomor ini (bukan nomor chat manual) supaya invoice blast-nya benar-benar
+		// keluar dari antrian retry & Belum Respons. Kosong = thread biasa (resolve pakai `phone`).
+		{"blast_phone", "TEXT"},
 	}
 	for _, c := range addColumns {
 		_, e := auditDB.Exec(fmt.Sprintf("ALTER TABLE chat_threads ADD COLUMN %s %s", c.col, c.def))
@@ -204,6 +213,10 @@ WHERE NOT EXISTS (SELECT 1 FROM chat_threads t WHERE t.phone = r.phone)`)
 
 var attemptTemplates [3]string
 
+// CATATAN ARSITEKTUR 2-NOMOR: pesan ini dikirim dari nomor BLASTER (disposable). Pelanggan
+// TIDAK boleh diminta "balas pesan ini" (balasan ke blaster tak ditangani & nomornya bisa
+// diganti). Sebaliknya, mereka diarahkan klik {{link}} → chat ke nomor INTI (inbound-only)
+// yang membawa Kode Referensi (token). {{link}} di-render per (phone,invoice) via applyLink.
 func loadAttemptTemplates() {
 	attemptTemplates[0] = pickTemplate("TEMPLATE_ATTEMPT_1", `Halo, Majoopreneurs!
 
@@ -213,8 +226,10 @@ Untuk menjaga keakuratan dan keamanan data, kami perlu melakukan validasi untuk 
 Nama Outlet: {{nama_outlet}}
 No. Invoice: {{nomer_invoice}}
 
-Apabila Kakak bersedia mengikuti proses validasi, mohon balas pesan ini pada jam operasional kami (09.00–16.00 WIB) agar proses penjadwalan dapat segera dilakukan.
-Tim Validator kami akan menghubungi Kakak melalui WhatsApp Call.
+Apabila Kakak bersedia mengikuti proses validasi, silakan klik link di bawah ini atau chat ke nomer 085119016132 dengan memasukkan Kode Referensi {{kode_referensi}} untuk terhubung dengan Tim Validator kami (jam operasional 09.00–16.00 WIB):
+{{link}}
+
+NOTES : Mohon untuk tidak membalas pesan ini, klik link diatas untuk mendapatkan antrian validasi anda.
 
 Terima kasih! 🙏`)
 
@@ -226,8 +241,10 @@ Untuk menjaga keakuratan dan keamanan data, kami perlu melakukan validasi untuk 
 Nama Outlet: {{nama_outlet}}
 No. Invoice: {{nomer_invoice}}
 
-Apabila Kakak bersedia mengikuti proses validasi, mohon balas pesan ini pada jam operasional kami (09.00–16.00 WIB) agar proses penjadwalan dapat segera dilakukan.
-Tim Validator kami akan menghubungi Kakak melalui WhatsApp Call.
+Apabila Kakak bersedia mengikuti proses validasi, silakan klik link di bawah ini atau chat ke nomer 085119016132 dengan memasukkan Kode Referensi {{kode_referensi}} untuk terhubung dengan Tim Validator kami (jam operasional 09.00–16.00 WIB):
+{{link}}
+
+NOTES : Mohon untuk tidak membalas pesan ini, klik link diatas untuk mendapatkan antrian validasi anda.
 
 Terima kasih! 🙏`)
 
@@ -239,9 +256,12 @@ Untuk menjaga keakuratan dan keamanan data, kami perlu melakukan validasi untuk 
 Nama Outlet: {{nama_outlet}}
 No. Invoice: {{nomer_invoice}}
 
-Apabila Kakak bersedia mengikuti proses validasi, mohon balas pesan ini pada jam operasional kami (09.00–16.00 WIB) agar proses penjadwalan dapat segera dilakukan.
-Tim Validator kami akan menghubungi Kakak melalui WhatsApp Call.
-Jika Kakak masih belum membalas pesan ini, maka penjadwalan kami tutup. Jika terdapat permintaan dan informasi lainnya, silahkan menghubungi Hotline Majoo pada nomer 0811-500-460
+Apabila Kakak bersedia mengikuti proses validasi, silakan klik link di bawah ini atau chat ke nomer 085119016132 dengan memasukkan Kode Referensi {{kode_referensi}} untuk terhubung dengan Tim Validator kami (jam operasional 09.00–16.00 WIB):
+{{link}}
+
+NOTES : Mohon untuk tidak membalas pesan ini, klik link diatas untuk mendapatkan antrian validasi anda.
+
+Jika Kakak masih belum menghubungi kami, maka penjadwalan kami tutup. Jika terdapat permintaan dan informasi lainnya, silahkan menghubungi Hotline Majoo pada nomer 0811-500-460
 
 Terima kasih! 🙏`)
 }
@@ -420,6 +440,51 @@ WHERE phone = ?`, tsStr, prev, tsStr, phone)
 	return err
 }
 
+// setThreadReplyJID — simpan nomor pengirim asli (wa_jid) saat pelanggan chat ke INTI dari
+// nomor BEDA dari yang di-blast. Balasan agent dikirim ke sini (lihat replyTargetPhone).
+func setThreadReplyJID(phone, waJID string) error {
+	_, err := auditDB.Exec(`UPDATE chat_threads SET wa_jid = ? WHERE phone = ?`, waJID, phone)
+	return err
+}
+
+// replyTargetPhone — nomor tujuan balas untuk sebuah thread: wa_jid kalau terisi (pelanggan
+// chat dari nomor lain), else phone (kasus umum).
+func replyTargetPhone(phone string) string {
+	var waJID sql.NullString
+	if err := auditDB.QueryRow(`SELECT wa_jid FROM chat_threads WHERE phone = ?`, phone).Scan(&waJID); err == nil && waJID.Valid && waJID.String != "" {
+		return waJID.String
+	}
+	return phone
+}
+
+// threadStatus — status thread sebuah nomor, "" kalau belum ada thread.
+func threadStatus(phone string) string {
+	var s string
+	_ = auditDB.QueryRow(`SELECT status FROM chat_threads WHERE phone = ?`, phone).Scan(&s)
+	return s
+}
+
+// upsertThreadInboundNonBlast — chat MANUAL masuk dari nomor yang TIDAK bisa dikaitkan ke
+// invoice (tak ada token valid & bukan nomor yang di-blast). Ditampung di bucket
+// 'inbound_non_blast' (bukan di-skip). Agent lalu minta Kode Referensi ke customer &
+// mencocokkannya (handleMatchToken). Thread di-key pakai nomor pengirim.
+func upsertThreadInboundNonBlast(phone, preview string, ts time.Time) error {
+	tsStr := ts.Format(time.RFC3339)
+	prev := truncate(preview, 80)
+	_, err := auditDB.Exec(`
+INSERT INTO chat_threads (phone, last_message_at, last_message_preview, last_message_direction, unread_count, status, created_at, updated_at)
+VALUES (?, ?, ?, 'in', 1, 'inbound_non_blast', ?, ?)
+ON CONFLICT(phone) DO UPDATE SET
+	last_message_at = excluded.last_message_at,
+	last_message_preview = excluded.last_message_preview,
+	last_message_direction = 'in',
+	unread_count = unread_count + 1,
+	status = CASE WHEN status IN ('done','invalid') THEN status ELSE 'inbound_non_blast' END,
+	updated_at = excluded.updated_at
+WHERE phone = ?`, phone, tsStr, prev, tsStr, tsStr, phone)
+	return err
+}
+
 func recordChatMessage(phone, direction, body, mediaType, waMsgID string, ts time.Time, blastID int64, senderEmail, senderName string) error {
 	isMedia := 0
 	if mediaType != "" {
@@ -494,7 +559,8 @@ func handleThreads(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// summary counts
-	var cAfter, cOpen, cProg, cOnGoing, cForce, cDone, cInvalid, cScheduled, cUnread int
+	var cAfter, cOpen, cProg, cOnGoing, cForce, cDone, cInvalid, cScheduled, cUnread, cNonBlast int
+	_ = auditDB.QueryRow(`SELECT COUNT(*) FROM chat_threads WHERE status = 'inbound_non_blast'`).Scan(&cNonBlast)
 	_ = auditDB.QueryRow(`SELECT COUNT(*) FROM chat_threads WHERE status = 'after_blast'`).Scan(&cAfter)
 	_ = auditDB.QueryRow(`SELECT COUNT(*) FROM chat_threads WHERE status = 'open'`).Scan(&cOpen)
 	_ = auditDB.QueryRow(`SELECT COUNT(*) FROM chat_threads WHERE status = 'in_progress'`).Scan(&cProg)
@@ -512,6 +578,7 @@ func handleThreads(w http.ResponseWriter, r *http.Request) {
 	totals["done"] = cDone
 	totals["invalid"] = cInvalid
 	totals["scheduled"] = cScheduled
+	totals["inbound_non_blast"] = cNonBlast
 	totals["unread"] = cUnread
 
 	// daftar team (distinct) untuk dropdown filter — lintas semua bucket biar stabil
@@ -657,10 +724,66 @@ func handleSetStatus(w http.ResponseWriter, r *http.Request) {
 	// Saat thread di-Done: tandai SEMUA invoice nomor ini resolved (permanen) — sumber PIC
 	// report "report resolved" + exclude dari antrian retry walau di-blast ulang nanti.
 	if status == "done" {
-		markPhoneResolved("majoo", "blast_recipients", "blast_logs", phone, user.Email, user.Name, time.Now())
+		// Thread hasil match manual (inbound_non_blast) menyimpan blast_phone = nomor ASLI yang
+		// di-blast. Resolve pakai itu supaya invoice blast-nya benar-benar keluar dari retry/Belum
+		// Respons (nomor chat manual biasanya tak punya blast_recipients sendiri).
+		resolvePhone := phone
+		var bp string
+		_ = auditDB.QueryRow(`SELECT COALESCE(blast_phone,'') FROM chat_threads WHERE phone=?`, phone).Scan(&bp)
+		if bp != "" {
+			resolvePhone = bp
+		}
+		markPhoneResolved("majoo", "blast_recipients", "blast_logs", resolvePhone, user.Email, user.Name, time.Now())
+		// Token validasi → used (dok: token used saat Done). Keluar dari antrian blast.
+		markTokenUsed(resolvePhone, "")
 	}
 
 	writeJSON(w, map[string]any{"ok": true})
+}
+
+// handleMatchToken — agent mencocokkan chat MANUAL (bucket inbound_non_blast) ke invoice via
+// Kode Referensi. Input: phone (thread) + code. Lookup token → tempel invoice/outlet + nomor
+// blast asli (blast_phone) ke thread, pindahkan ke in_progress + assign agent.
+func handleMatchToken(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", 405)
+		return
+	}
+	phone := r.URL.Query().Get("phone")
+	if phone == "" {
+		httpErr(w, 400, "phone required")
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		httpErr(w, 400, "form: %v", err)
+		return
+	}
+	raw := strings.TrimSpace(r.FormValue("code"))
+	if raw == "" {
+		httpErr(w, 400, "Kode Referensi kosong")
+		return
+	}
+	// Terima kode polos ("ABCD2345") atau baris lengkap ("Kode Referensi: ABCD2345").
+	code := strings.ToUpper(raw)
+	if tok := parseTokenFromBody(raw); tok != "" {
+		code = tok
+	}
+	blastPhone, invoice, outlet, ok := lookupToken(code)
+	if !ok {
+		httpErr(w, 404, "Kode Referensi '%s' tidak ditemukan di data blast.", code)
+		return
+	}
+	user, _ := userFromCtx(r.Context())
+	if _, err := auditDB.Exec(`UPDATE chat_threads SET
+		nomer_invoice = ?, nama_outlet = COALESCE(NULLIF(?, ''), nama_outlet),
+		blast_phone = ?, status = 'in_progress',
+		assigned_email = ?, assigned_name = ?, updated_at = datetime('now')
+		WHERE phone = ?`,
+		invoice, outlet, blastPhone, user.Email, user.Name, phone); err != nil {
+		httpErr(w, 500, "update: %v", err)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "nomer_invoice": invoice, "nama_outlet": outlet, "blast_phone": blastPhone})
 }
 
 // handleTemplates — return 3 attempt templates untuk preview di UI.
@@ -703,8 +826,8 @@ func handleReply(w http.ResponseWriter, r *http.Request) {
 	user, _ := userFromCtx(r.Context())
 
 	// Cek status thread — kalau done, reply masih boleh tapi status tidak berubah
-	// (sesuai spec: Done lock)
-	jid := types.NewJID(phone, types.DefaultUserServer)
+	// (sesuai spec: Done lock). Balas ke wa_jid kalau pelanggan chat dari nomor beda.
+	jid := types.NewJID(replyTargetPhone(phone), types.DefaultUserServer)
 	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 	defer cancel()
 
@@ -752,8 +875,8 @@ func handleResolve(w http.ResponseWriter, r *http.Request) {
 
 	closing := renderClosingTemplate(namaOutlet)
 
-	// Kirim closing via WA
-	jid := types.NewJID(phone, types.DefaultUserServer)
+	// Kirim closing via WA (ke wa_jid kalau pelanggan chat dari nomor beda)
+	jid := types.NewJID(replyTargetPhone(phone), types.DefaultUserServer)
 	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 	defer cancel()
 
@@ -786,7 +909,15 @@ func handleResolve(w http.ResponseWriter, r *http.Request) {
 
 	// Tandai SEMUA invoice nomor ini sebagai resolved (sumber report "report resolved" +
 	// exclude dari antrian retry, permanen walau di-blast ulang).
-	markPhoneResolved("majoo", "blast_recipients", "blast_logs", phone, user.Email, user.Name, now)
+	resolvePhone := phone
+	var bp string
+	_ = auditDB.QueryRow(`SELECT COALESCE(blast_phone,'') FROM chat_threads WHERE phone=?`, phone).Scan(&bp)
+	if bp != "" {
+		resolvePhone = bp
+	}
+	markPhoneResolved("majoo", "blast_recipients", "blast_logs", resolvePhone, user.Email, user.Name, now)
+	// Token validasi nomor ini → used (dok: token used saat Done).
+	markTokenUsed(resolvePhone, "")
 
 	writeJSON(w, map[string]any{"ok": true, "closing_sent": true})
 }

@@ -229,6 +229,24 @@ type ResolvedRow struct {
 	Phone        string `json:"phone"`
 	PICName      string `json:"pic_name"`
 	PICEmail     string `json:"pic_email"`
+	ResolvedAt   string `json:"resolved_at"` // waktu Done/Resolved (WIB, "2006-01-02 15:04")
+}
+
+// formatResolvedAt — normalkan resolved_at ke tampilan WIB "YYYY-MM-DD HH:MM".
+// Dua kemungkinan sumber: RFC3339 +07:00 (dari markPhoneResolved) atau "YYYY-MM-DD HH:MM:SS"
+// UTC (default datetime('now') pada baris backfill lama).
+func formatResolvedAt(s string) string {
+	if s == "" {
+		return ""
+	}
+	wib := time.FixedZone("WIB", 7*3600)
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t.In(wib).Format("2006-01-02 15:04")
+	}
+	if t, err := time.Parse("2006-01-02 15:04:05", s); err == nil {
+		return t.Add(7 * time.Hour).Format("2006-01-02 15:04") // datetime('now') = UTC → +7
+	}
+	return s
 }
 
 // queryResolved — PER NOMOR INVOICE yang sudah Done/Resolved, dari tabel resolved_invoices
@@ -240,10 +258,11 @@ SELECT nomer_invoice,
        COALESCE(nama_outlet, ''),
        phone,
        COALESCE(resolver_name, ''),
-       COALESCE(resolver_email, '')
+       COALESCE(resolver_email, ''),
+       COALESCE(resolved_at, '')
 FROM resolved_invoices
 WHERE suite = 'majoo'
-ORDER BY phone ASC, nomer_invoice ASC`)
+ORDER BY resolved_at DESC, phone ASC, nomer_invoice ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -251,9 +270,11 @@ ORDER BY phone ASC, nomer_invoice ASC`)
 	out := []ResolvedRow{}
 	for rows.Next() {
 		var row ResolvedRow
-		if err := rows.Scan(&row.NomerInvoice, &row.NamaOutlet, &row.Phone, &row.PICName, &row.PICEmail); err != nil {
+		var resolvedAt string
+		if err := rows.Scan(&row.NomerInvoice, &row.NamaOutlet, &row.Phone, &row.PICName, &row.PICEmail, &resolvedAt); err != nil {
 			return nil, err
 		}
+		row.ResolvedAt = formatResolvedAt(resolvedAt)
 		out = append(out, row)
 	}
 	return out, rows.Err()
@@ -269,7 +290,7 @@ func handleReportResolved(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"rows": list, "count": len(list)})
 }
 
-var resolvedHeader = []string{"Nomor Invoice", "Nama Outlet", "Nomor User", "Nama PIC (Resolved)"}
+var resolvedHeader = []string{"Nomor Invoice", "Nama Outlet", "Nomor User", "Nama PIC (Resolved)", "Waktu Resolved (WIB)"}
 
 // handleReportResolvedCSV — download CSV.
 func handleReportResolvedCSV(w http.ResponseWriter, r *http.Request) {
@@ -283,7 +304,7 @@ func handleReportResolvedCSV(w http.ResponseWriter, r *http.Request) {
 	cw := csv.NewWriter(w)
 	_ = cw.Write(resolvedHeader)
 	for _, row := range list {
-		_ = cw.Write([]string{row.NomerInvoice, row.NamaOutlet, row.Phone, row.PICName})
+		_ = cw.Write([]string{row.NomerInvoice, row.NamaOutlet, row.Phone, row.PICName, row.ResolvedAt})
 	}
 	cw.Flush()
 }
@@ -313,13 +334,13 @@ func handleReportResolvedExportSheet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	values := [][]any{{"Nomor Invoice", "Nama Outlet", "Nomor User", "Nama PIC (Resolved)"}}
+	values := [][]any{{"Nomor Invoice", "Nama Outlet", "Nomor User", "Nama PIC (Resolved)", "Waktu Resolved (WIB)"}}
 	for _, row := range list {
 		// prefix ' supaya Sheets treat nomor sebagai text (bukan scientific notation)
-		values = append(values, []any{row.NomerInvoice, row.NamaOutlet, "'" + row.Phone, row.PICName})
+		values = append(values, []any{row.NomerInvoice, row.NamaOutlet, "'" + row.Phone, row.PICName, row.ResolvedAt})
 	}
 
-	clearRange := fmt.Sprintf("%s!A:D", sn)
+	clearRange := fmt.Sprintf("%s!A:E", sn)
 	if _, err := sheetsSvc.Spreadsheets.Values.Clear(spreadsheetID, clearRange, &sheets.ClearValuesRequest{}).Context(ctx).Do(); err != nil {
 		httpErr(w, 500, "clear sheet: %v. Pastikan service account punya akses Editor.", err)
 		return

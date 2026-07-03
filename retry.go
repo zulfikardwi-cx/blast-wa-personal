@@ -106,8 +106,8 @@ func processRetries(force bool, limit, targetAttempt int, actorEmail, actorName 
 		return
 	}
 
-	// Cek WA connected
-	_, loggedIn, connected := state.snapshot()
+	// Cek WA connected — retry dikirim dari nomor BLASTER.
+	_, loggedIn, connected := blasterState.snapshot()
 	if !loggedIn || !connected {
 		return
 	}
@@ -171,6 +171,7 @@ func processRetries(force bool, limit, targetAttempt int, actorEmail, actorName 
 
 		template := GetAttemptTemplate(next)
 		body := renderTemplateWithVars(template, r.namaOutlet, r.nomerInvoice)
+		body = applyLink(body, r.phone, r.nomerInvoice, r.namaOutlet)
 
 		if err := sendRetryOne(r.phone, body); err != nil {
 			log.Printf("retry: phone=%s inv=%s attempt=%d FAILED: %v", r.phone, r.nomerInvoice, next, err)
@@ -313,13 +314,18 @@ func stillNeedsRetry(phone string, startOfToday time.Time) bool {
 	return !attemptedToday(lastAt, startOfToday)
 }
 
+// sendRetryOne — attempt 2/3 juga dikirim dari NOMOR BLASTER (bukan INTI).
 func sendRetryOne(phone, body string) error {
+	client := blasterState.client
+	if client == nil {
+		return fmt.Errorf("blaster client belum siap")
+	}
 	jid := types.NewJID(phone, types.DefaultUserServer)
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
 
 	// Cek nomor masih di WA
-	res, err := state.client.IsOnWhatsApp(ctx, []string{"+" + phone})
+	res, err := client.IsOnWhatsApp(ctx, []string{"+" + phone})
 	if err != nil {
 		return fmt.Errorf("check: %w", err)
 	}
@@ -328,13 +334,13 @@ func sendRetryOne(phone, body string) error {
 	}
 
 	// Resolve PN -> LID (sama seperti sendOne) — tanpa ini attempt 2/3 undecryptable.
-	jid = resolveToLID(ctx, jid)
+	jid = resolveToLID(ctx, client, jid)
 
 	// Bootstrap session
-	_, _ = state.client.GetUserDevicesContext(ctx, []types.JID{jid})
+	_, _ = client.GetUserDevicesContext(ctx, []types.JID{jid})
 
 	msg := &waProto.Message{Conversation: proto.String(body)}
-	_, err = state.client.SendMessage(ctx, jid, msg)
+	_, err = client.SendMessage(ctx, jid, msg)
 	return err
 }
 
@@ -393,9 +399,9 @@ func handleRetryRunNow(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "POST only", http.StatusMethodNotAllowed)
 		return
 	}
-	_, loggedIn, connected := state.snapshot()
+	_, loggedIn, connected := blasterState.snapshot()
 	if !loggedIn || !connected {
-		httpErr(w, 400, "WhatsApp belum terhubung — tidak ada yang dikirim.")
+		httpErr(w, 400, "Nomor Blaster belum terhubung — tidak ada yang dikirim.")
 		return
 	}
 	limit := 0
