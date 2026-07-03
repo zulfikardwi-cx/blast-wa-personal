@@ -365,6 +365,7 @@
 const API_BASE = (window.APP_CONFIG && window.APP_CONFIG.API_BASE) || '';
 let me = null;
 let currentPhone = null;
+let currentHasInbound = false; // apakah thread aktif punya pesan MASUK dari customer
 let currentBucket = 'after_blast';
 let currentTeam = '';
 let closingTemplateText = '';
@@ -600,6 +601,7 @@ async function loadMessages(scrollBottom) {
     }
 
     const msgs = r.messages || [];
+    currentHasInbound = msgs.some(m => m.direction === 'in');
     const newMaxID = msgs.length ? msgs[msgs.length-1].id : 0;
     if (newMaxID === lastMessageID && $('#messages').children.length > 0) return;
     lastMessageID = newMaxID;
@@ -630,8 +632,24 @@ async function loadMessages(scrollBottom) {
 
 // Done = muat closing message ke kotak balasan agar agent bisa edit dulu.
 // Thread baru pindah ke Done SETELAH agent menekan Kirim (lihat sendReply).
-$('#actDone').addEventListener('click', () => {
+$('#actDone').addEventListener('click', async () => {
   if (!currentPhone) return;
+  // Kalau customer BELUM pernah membalas ke nomor Inti (mis. thread After Blast), nomor Inti
+  // TIDAK bisa mengirim pesan penutup ke dia — WhatsApp memblokir kontak dingin (error 463).
+  // Jadi tutup sebagai Done/Resolved TANPA kirim pesan penutup.
+  if (!currentHasInbound) {
+    if (!confirm('Customer belum pernah membalas ke nomor Inti, jadi pesan penutup tidak bisa dikirim (akan error 463).\n\nTutup thread ini sebagai Done / Resolved TANPA kirim pesan?')) return;
+    $('#actDone').disabled = true;
+    try {
+      const fd = new FormData(); fd.append('status', 'done');
+      const r = await apiFetch(`/api/inbox/status?phone=${encodeURIComponent(currentPhone)}`, { method: 'POST', body: fd });
+      if (!r.ok) { alert('Gagal: ' + await r.text()); return; }
+      toast('✅ Ditutup sebagai Done/Resolved (tanpa pesan penutup).');
+      await loadMessages(false); loadThreads();
+    } finally { $('#actDone').disabled = false; }
+    return;
+  }
+  // Ada percakapan → muat pesan penutup untuk dikirim & tutup.
   const ta = $('#replyText');
   ta.value = closingTemplateText || '';
   ta.style.height = 'auto';
