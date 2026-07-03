@@ -328,6 +328,12 @@ WHERE status IN ('after_blast', 'in_progress') AND current_attempt >= 3`)
 		// pasti > cutoff → tetap di-close.)
 		t3 = t3.In(wibLoc)
 		cutoff := time.Date(t3.Year(), t3.Month(), t3.Day(), forceCloseHour, 0, 0, 0, wibLoc)
+		// Kalau Attempt 3 dikirim SETELAH jam force-close (mis. blast telat karena kendala nomor
+		// banned), JANGAN langsung tutup — customer belum punya window respons sama sekali. Geser
+		// cutoff ke jam force-close HARI BERIKUTNYA supaya mereka tetap dapat kesempatan merespons.
+		if !t3.Before(cutoff) {
+			cutoff = cutoff.AddDate(0, 0, 1)
+		}
 		if now.Before(cutoff) {
 			continue
 		}

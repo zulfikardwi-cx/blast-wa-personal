@@ -95,12 +95,21 @@ ORDER BY r.phone ASC, r.nomer_invoice ASC`)
 // buildInvoiceRow — susun UnresponsiveRow per-invoice dari agregat blast log (dipakai
 // majoo & Zopoz supaya logikanya identik). Lihat queryUnresponsive untuk aturan kolom.
 func buildInvoiceRow(phone, outlet, inv string, a1s, a1f, a2s, a3s int, a1err, threadStatus, reason string) UnresponsiveRow {
+	// PRIORITAS SENT: untuk satu (nomor, invoice) bisa ada beberapa baris blast log — mis. satu
+	// gagal (error sistem/ban: usync timeout / 463 / websocket) lalu di batch lain berhasil.
+	// Kalau ada yang SENT, ambil yang sent → "No Response". "Rejected" HANYA untuk penolakan
+	// NYATA (nomor tidak terdaftar di WhatsApp), yang ditandai lewat thread status='rejected'.
+	// Error sistem/ban BUKAN reject dan tidak boleh menutupi baris sent.
+	realReject := (threadStatus == "rejected")
+
 	att1 := "-"
-	if a1f == 1 {
+	if a1s == 1 {
+		att1 = "No Response" // pernah terkirim → ambil yang sent, abaikan baris gagal error sistem
+	} else if realReject {
 		att1 = "Rejected"
-	} else if a1s == 1 {
-		att1 = "No Response"
 	}
+	// a1f tanpa sent & bukan realReject = gagal error sistem/ban → biarkan "-" (bukan Rejected).
+
 	att2 := "-"
 	if a2s == 1 {
 		att2 = "No Response"
@@ -111,11 +120,14 @@ func buildInvoiceRow(phone, outlet, inv string, a1s, a1f, a2s, a3s int, a1err, t
 	}
 	rejected := "-"
 	note := ""
-	if a1f == 1 {
+	if att1 == "Rejected" {
 		rejected = "reject"
-		note = a1err
+		note = reason
 		if note == "" {
-			note = "Gagal kirim Attempt 1"
+			note = a1err
+		}
+		if note == "" {
+			note = "Nomor tidak terdaftar di WhatsApp"
 		}
 	} else if a3s == 1 && threadStatus == "force_close" {
 		rejected = "reject"
