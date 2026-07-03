@@ -111,6 +111,11 @@ func processRetries(force bool, limit, targetAttempt int, actorEmail, actorName 
 	if !loggedIn || !connected {
 		return
 	}
+	// Jangan tumpang-tindih dengan blast Attempt-1 / retry lain yang masih jalan di Progress.
+	if state.job != nil && state.job.Running {
+		log.Println("retry: ada proses blast lain sedang jalan (Progress), skip")
+		return
+	}
 
 	// "max 1x/hari per thread": eligible kalau belum pernah di-attempt pada hari kalender
 	// ini (WIB). startOfToday = 00:00 WIB hari ini.
@@ -160,26 +165,83 @@ func processRetries(force bool, limit, targetAttempt int, actorEmail, actorName 
 		log.Printf("retry: recordRetryBatchStart error: %v", err)
 	}
 
-	sent, failed := 0, 0
+	// Progress LIVE di tab Progress (sama seperti blast Attempt 1) — pakai state.job.
+	items := make([]*RecipientStatus, len(batch))
 	for i, r := range batch {
+		items[i] = &RecipientStatus{Phone: r.phone, NamaOutlet: r.namaOutlet, NomerInv: r.nomerInvoice, Status: "pending"}
+	}
+	job := &BlastJob{
+		ID:        fmt.Sprintf("retry-%d", batchStart.Unix()),
+		UserEmail: auditEmail,
+		UserName:  actorName,
+		Template:  fmt.Sprintf("Retry Attempt %d", targetAttempt),
+		StartedAt: batchStart,
+		Running:   true,
+		MinDelay:  retryMinJitter,
+		MaxDelay:  retryMaxJitter,
+		Total:     len(batch),
+		Items:     items,
+	}
+	state.job = job
+	defer func() {
+		t := time.Now()
+		job.mu.Lock()
+		job.Running = false
+		job.EndedAt = &t
+		job.mu.Unlock()
+	}()
+
+	sent, failed := 0, 0
+	consecutiveFail := 0
+	const maxRetryConsecFail = 3
+	for i, r := range batch {
+		// STOP kalau nomor blaster putus di tengah proses — sisa di-skip (permintaan user).
+		if _, _, conn := blasterState.snapshot(); !conn {
+			log.Printf("retry: blaster disconnected di tengah proses — stop, %d sisa di-skip", len(batch)-i)
+			markRetryRemainingSkipped(job, i, "blaster disconnected")
+			break
+		}
+
 		// Re-check sebelum send (race guard): nomor belum terminal & invoice ini belum
 		// dikirimi hari ini & attempt-nya masih < 3.
 		next, ok := invoiceStillNeedsRetry("majoo", "chat_threads", "blast_recipients", "blast_logs", r.phone, r.nomerInvoice, startOfToday)
 		if !ok {
+			job.mu.Lock()
+			items[i].Status = "skipped"
+			items[i].Error = "tidak perlu retry (sudah dikirim hari ini / terminal)"
+			job.Skipped++
+			job.mu.Unlock()
 			continue
 		}
 
 		template := GetAttemptTemplate(next)
 		body := renderTemplateWithVars(template, r.namaOutlet, r.nomerInvoice)
 		body = applyLink(body, r.phone, r.nomerInvoice, r.namaOutlet)
+		job.mu.Lock()
+		items[i].Message = body
+		job.mu.Unlock()
 
 		if err := sendRetryOne(r.phone, body); err != nil {
 			log.Printf("retry: phone=%s inv=%s attempt=%d FAILED: %v", r.phone, r.nomerInvoice, next, err)
 			failed++
+			consecutiveFail++
+			job.mu.Lock()
+			items[i].Status = "failed"
+			items[i].Error = err.Error()
+			job.Failed++
+			job.mu.Unlock()
 			_ = recordRetryRecipient(retryLogID, r.phone, r.namaOutlet, r.nomerInvoice, "failed", err.Error(), body, time.Now())
+			// Gagal beruntun (usync timeout / 463 / koneksi putus) = sesi blaster bermasalah →
+			// STOP, jangan lanjut spam ke nomor sisa (nomor kemungkinan sudah banned).
+			if consecutiveFail >= maxRetryConsecFail {
+				log.Printf("retry: %d gagal beruntun — sesi blaster bermasalah, stop. sisa di-skip", consecutiveFail)
+				markRetryRemainingSkipped(job, i+1, "aborted: sesi blaster bermasalah")
+				break
+			}
 			continue
 		}
 
+		consecutiveFail = 0
 		now := time.Now()
 		if err := bumpThreadAfterRetry("chat_threads", r.phone, body, next, now); err != nil {
 			log.Printf("retry: bumpThreadAfterRetry error: %v", err)
@@ -190,6 +252,11 @@ func processRetries(force bool, limit, targetAttempt int, actorEmail, actorName 
 		_ = recordRetryRecipient(retryLogID, r.phone, r.namaOutlet, r.nomerInvoice, "sent", "", body, now)
 		log.Printf("retry: phone=%s inv=%s attempt %d sent", r.phone, r.nomerInvoice, next)
 		sent++
+		job.mu.Lock()
+		items[i].Status = "sent"
+		items[i].SentAt = now.Format(time.RFC3339)
+		job.Sent++
+		job.mu.Unlock()
 
 		// Jitter delay antara send (kecuali yang terakhir)
 		if i < len(batch)-1 {
@@ -342,6 +409,20 @@ func sendRetryOne(phone, body string) error {
 	msg := &waProto.Message{Conversation: proto.String(body)}
 	_, err = client.SendMessage(ctx, jid, msg)
 	return err
+}
+
+// markRetryRemainingSkipped — tandai item Progress dari index `from` s/d akhir jadi 'skipped'
+// (dipakai saat retry di-STOP di tengah jalan: blaster putus / sesi bermasalah).
+func markRetryRemainingSkipped(job *BlastJob, from int, reason string) {
+	job.mu.Lock()
+	for k := from; k < len(job.Items); k++ {
+		if job.Items[k].Status == "pending" {
+			job.Items[k].Status = "skipped"
+			job.Items[k].Error = reason
+			job.Skipped++
+		}
+	}
+	job.mu.Unlock()
 }
 
 func boolEnv(key string, def bool) bool {

@@ -66,6 +66,7 @@
   .dot.scheduled{background:#22d3ee}
   .dot.force_close{background:#64748b}
   .dot.inbound_non_blast{background:#f472b6}
+  .dot.outside_blast{background:#94a3b8}
 
   .user-card{margin-top:auto;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px;font-size:11px;color:var(--muted)}
   .user-card b{color:var(--text);display:block;font-size:12px;font-weight:600}
@@ -103,6 +104,7 @@
   .status-tag.on_going{background:rgba(167,139,250,.2);color:#a78bfa}
   .status-tag.force_close{background:rgba(100,116,139,.2);color:#94a3b8}
   .status-tag.inbound_non_blast{background:rgba(244,114,182,.2);color:#f472b6}
+  .status-tag.outside_blast{background:rgba(148,163,184,.2);color:#94a3b8}
   .thread-item .team-tag{display:inline-block;font-size:9px;padding:1px 7px;border-radius:8px;margin-top:6px;margin-left:6px;font-weight:600;background:rgba(45,189,182,.18);color:var(--teal);text-transform:uppercase;letter-spacing:.3px}
   .thread-item .unread{background:var(--lime);color:#0b1220;font-size:10px;font-weight:600;padding:1px 6px;border-radius:8px;position:absolute;top:14px;right:18px}
   .empty{padding:60px 20px;text-align:center;color:var(--muted);font-size:13px}
@@ -250,6 +252,11 @@
       <span class="name">Done</span>
       <span class="count" id="cDone">0</span>
     </button>
+    <button class="bucket-btn" data-bucket="outside_blast">
+      <span class="dot outside_blast"></span>
+      <span class="name">Di luar Blast</span>
+      <span class="count" id="cOutside">0</span>
+    </button>
     <button class="bucket-btn" data-bucket="invalid">
       <span class="dot invalid"></span>
       <span class="name">Invalid</span>
@@ -305,6 +312,7 @@
           <div class="h-name" id="hName">—</div>
           <div class="h-phone" id="hPhone">—</div>
           <div class="h-assign" id="hAssign" style="display:none"></div>
+          <div class="h-assign" id="hInvoice" style="display:none;color:#f472b6"></div>
           <div class="h-followup" id="hFollowup" style="display:none"></div>
         </div>
         <div class="actions">
@@ -320,10 +328,11 @@
       <div class="messages" id="messages"></div>
 
       <div id="matchBar" style="display:none;padding:12px 20px;border-top:1px solid var(--line);background:rgba(244,114,182,.08)">
-        <div style="font-size:12px;color:#f472b6;margin-bottom:8px">🔗 <b>Inbound non-Blast</b> — chat manual belum terkait invoice. Minta <b>Kode Referensi</b> ke customer, lalu cocokkan:</div>
+        <div id="matchTitle" style="font-size:12px;color:#f472b6;margin-bottom:8px"></div>
         <div style="display:flex;gap:8px;align-items:center">
           <input id="matchCode" placeholder="Kode Referensi (mis. ABCD2345)" style="flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 12px;font:13px inherit;text-transform:uppercase">
-          <button id="matchBtn" style="background:#f472b6;color:#3b0a24;border:0;padding:9px 18px;border-radius:8px;cursor:pointer;font-weight:600">Cocokkan</button>
+          <button id="matchBtn" style="background:#f472b6;color:#3b0a24;border:0;padding:9px 18px;border-radius:8px;cursor:pointer;font-weight:600;white-space:nowrap">Cocokkan</button>
+          <button id="tagOutsideBtn" style="background:transparent;border:1px solid var(--line);color:var(--muted);padding:9px 14px;border-radius:8px;cursor:pointer;font-weight:600;white-space:nowrap"></button>
         </div>
       </div>
 
@@ -397,7 +406,7 @@ function renderMsgBody(m) {
 function showApiErr(msg) { $('#apiErrBanner').textContent = msg; $('#apiErrBanner').style.display = 'block'; }
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 2500); }
 
-const bucketLabels = { after_blast:'After Blast', inbound_non_blast:'Inbound non Blast', open:'Open', in_progress:'In Progress', on_going:'On Going', scheduled:'Scheduled', force_close:'Force Close', done:'Done', invalid:'Invalid' };
+const bucketLabels = { after_blast:'After Blast', inbound_non_blast:'Inbound non Blast', outside_blast:'Di luar Blast', open:'Open', in_progress:'In Progress', on_going:'On Going', scheduled:'Scheduled', force_close:'Force Close', done:'Done', invalid:'Invalid' };
 
 async function loadMe() {
   try {
@@ -435,6 +444,7 @@ async function loadThreads() {
     const r = await apiFetch(`/api/inbox/threads?status=${currentBucket}`).then(r => r.json());
     $('#cAfterBlast').textContent = r.counts.after_blast || 0;
     $('#cNonBlast').textContent = r.counts.inbound_non_blast || 0;
+    $('#cOutside').textContent = r.counts.outside_blast || 0;
     $('#cOpen').textContent = r.counts.open || 0;
     $('#cProg').textContent = r.counts.in_progress || 0;
     $('#cOnGoing').textContent = r.counts.on_going || 0;
@@ -565,8 +575,29 @@ async function loadMessages(scrollBottom) {
         : (ongoing ? 'Sedang divalidasi (On Going). Tulis balasan...' : 'Tulis balasan...');
     }
 
-    // Bucket inbound_non_blast → tampilkan bar "Cocokkan Kode Referensi".
-    $('#matchBar').style.display = (r.status === 'inbound_non_blast') ? 'block' : 'none';
+    // Indikator terkait invoice (thread non-blast yang sudah dicocokkan menyimpan blast_phone).
+    if (r.blast_phone && r.nomer_invoice) {
+      $('#hInvoice').textContent = '🔗 Terkait invoice: ' + r.nomer_invoice + ' (via blast ' + r.blast_phone + ')';
+      $('#hInvoice').style.display = '';
+    } else {
+      $('#hInvoice').style.display = 'none';
+    }
+
+    // Bar "Cocokkan Kode Referensi" — TETAP muncul selama thread non-blast & belum dicocokkan
+    // (tidak hilang walau sudah dibalas). inbound_non_blast = belum ditandai; outside_blast =
+    // sudah ditandai di luar blast tapi masih bisa dicocokkan bila customer akhirnya beri kode.
+    const nb = (r.status === 'inbound_non_blast');
+    const ob = (r.status === 'outside_blast');
+    if (nb || ob) {
+      $('#matchBar').style.display = 'block';
+      $('#matchTitle').innerHTML = nb
+        ? '🔗 <b>Inbound non-Blast</b> — chat manual belum terkait invoice. Minta <b>Kode Referensi</b> ke customer, lalu cocokkan:'
+        : '🏷️ <b>Di luar Blast</b> — ditandai bukan dari blast. Masih bisa dicocokkan bila customer memberi kode:';
+      $('#tagOutsideBtn').textContent = nb ? 'Tandai di luar blast' : '↩ Kembalikan';
+      $('#tagOutsideBtn').dataset.target = nb ? 'outside_blast' : 'inbound_non_blast';
+    } else {
+      $('#matchBar').style.display = 'none';
+    }
 
     const msgs = r.messages || [];
     const newMaxID = msgs.length ? msgs[msgs.length-1].id : 0;
@@ -762,6 +793,22 @@ document.addEventListener('click', (e) => {
 // Cocokkan Kode Referensi (bucket inbound_non_blast) → tautkan chat manual ke invoice.
 $('#matchBtn').addEventListener('click', matchToken);
 $('#matchCode').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); matchToken(); } });
+
+// Tandai "di luar blast" / kembalikan — untuk chat manual tanpa Kode Referensi.
+$('#tagOutsideBtn').addEventListener('click', async () => {
+  const target = $('#tagOutsideBtn').dataset.target || 'outside_blast';
+  if (!currentPhone) return;
+  const btn = $('#tagOutsideBtn');
+  btn.disabled = true;
+  try {
+    const fd = new FormData(); fd.append('status', target);
+    const r = await apiFetch(`/api/inbox/status?phone=${encodeURIComponent(currentPhone)}`, { method: 'POST', body: fd });
+    if (!r.ok) { alert('Gagal: ' + await r.text()); return; }
+    toast(target === 'outside_blast' ? '🏷️ Ditandai di luar blast.' : '↩ Dikembalikan ke Non-Blast.');
+    await loadMessages(false); loadThreads();
+  } catch (e) { alert('Error: ' + e); }
+  finally { btn.disabled = false; }
+});
 
 async function matchToken() {
   const code = ($('#matchCode').value || '').trim();

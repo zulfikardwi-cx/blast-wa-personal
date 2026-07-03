@@ -413,7 +413,10 @@ UPDATE chat_threads SET
 	last_message_at = ?,
 	last_message_preview = ?,
 	last_message_direction = 'out',
-	status = CASE WHEN status IN ('done','invalid','on_going','scheduled') THEN status ELSE 'in_progress' END,
+	-- Non-blast (inbound_non_blast/outside_blast) TIDAK dipromosikan ke in_progress supaya bar
+	-- "Cocokkan Kode Referensi" tetap muncul sampai benar-benar dicocokkan/di-tag. Agent yang
+	-- balas tetap dicatat sebagai PIC.
+	status = CASE WHEN status IN ('done','invalid','on_going','scheduled','inbound_non_blast','outside_blast') THEN status ELSE 'in_progress' END,
 	assigned_email = CASE WHEN status IN ('done','invalid','on_going','scheduled') THEN assigned_email ELSE ? END,
 	assigned_name = CASE WHEN status IN ('done','invalid','on_going','scheduled') THEN assigned_name ELSE ? END,
 	updated_at = ?
@@ -445,6 +448,15 @@ WHERE phone = ?`, tsStr, prev, tsStr, phone)
 func setThreadReplyJID(phone, waJID string) error {
 	_, err := auditDB.Exec(`UPDATE chat_threads SET wa_jid = ? WHERE phone = ?`, waJID, phone)
 	return err
+}
+
+// threadByReplyJID — cari thread canonical yang wa_jid-nya = nomor pengirim (customer chat
+// dari nomor beda dari yang di-blast). Dipakai supaya pesan lanjutan tanpa token ikut ke
+// thread yang benar, bukan bikin thread baru. "" kalau tak ada.
+func threadByReplyJID(waJID string) string {
+	var phone string
+	_ = auditDB.QueryRow(`SELECT phone FROM chat_threads WHERE wa_jid = ? ORDER BY updated_at DESC LIMIT 1`, waJID).Scan(&phone)
+	return phone
 }
 
 // replyTargetPhone — nomor tujuan balas untuk sebuah thread: wa_jid kalau terisi (pelanggan
@@ -479,7 +491,7 @@ ON CONFLICT(phone) DO UPDATE SET
 	last_message_preview = excluded.last_message_preview,
 	last_message_direction = 'in',
 	unread_count = unread_count + 1,
-	status = CASE WHEN status IN ('done','invalid') THEN status ELSE 'inbound_non_blast' END,
+	status = CASE WHEN status IN ('done','invalid','outside_blast') THEN status ELSE 'inbound_non_blast' END,
 	updated_at = excluded.updated_at
 WHERE phone = ?`, phone, tsStr, prev, tsStr, tsStr, phone)
 	return err
@@ -559,8 +571,9 @@ func handleThreads(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// summary counts
-	var cAfter, cOpen, cProg, cOnGoing, cForce, cDone, cInvalid, cScheduled, cUnread, cNonBlast int
+	var cAfter, cOpen, cProg, cOnGoing, cForce, cDone, cInvalid, cScheduled, cUnread, cNonBlast, cOutside int
 	_ = auditDB.QueryRow(`SELECT COUNT(*) FROM chat_threads WHERE status = 'inbound_non_blast'`).Scan(&cNonBlast)
+	_ = auditDB.QueryRow(`SELECT COUNT(*) FROM chat_threads WHERE status = 'outside_blast'`).Scan(&cOutside)
 	_ = auditDB.QueryRow(`SELECT COUNT(*) FROM chat_threads WHERE status = 'after_blast'`).Scan(&cAfter)
 	_ = auditDB.QueryRow(`SELECT COUNT(*) FROM chat_threads WHERE status = 'open'`).Scan(&cOpen)
 	_ = auditDB.QueryRow(`SELECT COUNT(*) FROM chat_threads WHERE status = 'in_progress'`).Scan(&cProg)
@@ -579,6 +592,7 @@ func handleThreads(w http.ResponseWriter, r *http.Request) {
 	totals["invalid"] = cInvalid
 	totals["scheduled"] = cScheduled
 	totals["inbound_non_blast"] = cNonBlast
+	totals["outside_blast"] = cOutside
 	totals["unread"] = cUnread
 
 	// daftar team (distinct) untuk dropdown filter — lintas semua bucket biar stabil
@@ -637,8 +651,8 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// fetch thread meta
-	var nama, status, assignedEmail, assignedName, followupAt string
-	_ = auditDB.QueryRow(`SELECT COALESCE(nama_outlet,''), status, COALESCE(assigned_email,''), COALESCE(assigned_name,''), COALESCE(followup_at,'') FROM chat_threads WHERE phone = ?`, phone).Scan(&nama, &status, &assignedEmail, &assignedName, &followupAt)
+	var nama, status, assignedEmail, assignedName, followupAt, nomerInvoice, blastPhone string
+	_ = auditDB.QueryRow(`SELECT COALESCE(nama_outlet,''), status, COALESCE(assigned_email,''), COALESCE(assigned_name,''), COALESCE(followup_at,''), COALESCE(nomer_invoice,''), COALESCE(blast_phone,'') FROM chat_threads WHERE phone = ?`, phone).Scan(&nama, &status, &assignedEmail, &assignedName, &followupAt, &nomerInvoice, &blastPhone)
 
 	writeJSON(w, map[string]any{
 		"phone":            phone,
@@ -647,6 +661,8 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 		"assigned_email":   assignedEmail,
 		"assigned_name":    assignedName,
 		"followup_at":      followupAt,
+		"nomer_invoice":    nomerInvoice,
+		"blast_phone":      blastPhone,
 		"messages":         out,
 		"closing_template": renderClosingTemplate(nama),
 	})
@@ -687,8 +703,8 @@ func handleSetStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	status := r.FormValue("status")
-	if status != "open" && status != "in_progress" && status != "done" && status != "invalid" && status != "on_going" && status != "force_close" && status != "scheduled" {
-		httpErr(w, 400, "status invalid (open|in_progress|done|invalid|on_going|force_close|scheduled)")
+	if status != "open" && status != "in_progress" && status != "done" && status != "invalid" && status != "on_going" && status != "force_close" && status != "scheduled" && status != "outside_blast" {
+		httpErr(w, 400, "status invalid (open|in_progress|done|invalid|on_going|force_close|scheduled|outside_blast)")
 		return
 	}
 	user, _ := userFromCtx(r.Context())
@@ -754,9 +770,12 @@ func handleMatchToken(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 400, "phone required")
 		return
 	}
-	if err := r.ParseForm(); err != nil {
-		httpErr(w, 400, "form: %v", err)
-		return
+	// FormData dari browser = multipart → ParseMultipartForm (ParseForm saja tak baca body ini).
+	if err := r.ParseMultipartForm(2 << 20); err != nil {
+		if err := r.ParseForm(); err != nil {
+			httpErr(w, 400, "form: %v", err)
+			return
+		}
 	}
 	raw := strings.TrimSpace(r.FormValue("code"))
 	if raw == "" {
@@ -774,9 +793,12 @@ func handleMatchToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user, _ := userFromCtx(r.Context())
+	// Setelah dicocokkan, thread jadi thread normal — bucket ikut arah pesan TERAKHIR:
+	// pesan terakhir dari customer ('in') → open; dari agent ('out') → in_progress.
 	if _, err := auditDB.Exec(`UPDATE chat_threads SET
 		nomer_invoice = ?, nama_outlet = COALESCE(NULLIF(?, ''), nama_outlet),
-		blast_phone = ?, status = 'in_progress',
+		blast_phone = ?,
+		status = CASE WHEN last_message_direction = 'in' THEN 'open' ELSE 'in_progress' END,
 		assigned_email = ?, assigned_name = ?, updated_at = datetime('now')
 		WHERE phone = ?`,
 		invoice, outlet, blastPhone, user.Email, user.Name, phone); err != nil {

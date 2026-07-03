@@ -395,9 +395,9 @@ func handleIncomingWA(e *events.Message) {
 		return
 	}
 
-	// Sudah ada thread 'inbound_non_blast' (chat manual yang belum dicocokkan agent) untuk
-	// nomor ini? Tetap di bucket itu — jangan promosikan ke Open sebelum Kode Referensi cocok.
-	if threadStatus(senderPhone) == "inbound_non_blast" {
+	// Sudah ada thread non-blast (inbound_non_blast belum dicocokkan, atau outside_blast) untuk
+	// nomor ini? Tetap di bucket itu — jangan promosikan ke Open (append pesan saja).
+	if st := threadStatus(senderPhone); st == "inbound_non_blast" || st == "outside_blast" {
 		if err := recordChatMessage(senderPhone, "in", body, mediaType, e.Info.ID, e.Info.Timestamp, 0, "", ""); err != nil {
 			log.Println("warn: recordChatMessage inbound_non_blast:", err)
 		}

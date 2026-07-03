@@ -524,7 +524,17 @@ async function tickProgress() {
     $('#startBtn').disabled = false;
     $('#cancelBtn').style.display = '';
     loadHistory();
+    loadReport(); // refresh chip eligible Att 2/3 (yang sukses terkirim keluar dari daftar)
   }
+}
+
+// Pindah tampilan ke tab Progress secara programatik (dipakai saat Run Attempt 2/3).
+function showProgressTab() {
+  $$('.tab').forEach(x => x.classList.remove('active'));
+  $$('.tab-pane').forEach(x => x.classList.remove('active'));
+  const t = $('.tab[data-tab="progress"]'), p = $('.tab-pane[data-pane="progress"]');
+  if (t) t.classList.add('active');
+  if (p) p.classList.add('active');
 }
 
 function pollProgress() {
@@ -712,9 +722,11 @@ async function runAttempt(n) {
   try {
     const r = await apiFetch('/api/retry/run-now?attempt=' + n, { method: 'POST' });
     if (!r.ok) { alert('Gagal: ' + await r.text()); return; }
-    alert(`▶ Blast manual Attempt ${n} dimulai untuk ${count} nomor.\nPantau log server (blast.log). Thread pindah ke Open saat customer membalas.${n === 2 ? '\n\nTunggu batch Attempt 2 selesai sebelum menjalankan Attempt 3.' : ''}`);
+    // Pantau LIVE di tab Progress (Attempt 2/3 kini tampil seperti Attempt 1).
+    showProgressTab();
+    pollProgress();
   } finally {
-    setTimeout(() => { btn.disabled = false; btn.textContent = old; loadReport(); }, 8000);
+    setTimeout(() => { btn.disabled = false; btn.textContent = old; }, 3000);
   }
 }
 $('#runAtt2Btn').addEventListener('click', () => runAttempt(2));

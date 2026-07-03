@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
@@ -57,6 +58,10 @@ func (s *blasterAppState) snapshot() (string, bool, bool) {
 	return s.qrCode, s.loggedIn, s.connected
 }
 
+// blasterContainer — sqlstore container blaster, disimpan supaya re-pair setelah logout bisa
+// mengambil DEVICE STORE BARU (device lama sudah dihapus whatsmeow saat LoggedOut).
+var blasterContainer *sqlstore.Container
+
 // initBlasterClient — buat client WA disposable dengan session store terpisah. Dipanggil
 // dari main() setelah client INTI siap. Non-fatal: kalau gagal, log saja — blast mati tapi
 // Inbox INTI tetap jalan.
@@ -66,16 +71,24 @@ func initBlasterClient(rootCtx context.Context) error {
 	if err != nil {
 		return err
 	}
+	blasterContainer = container
 	deviceStore, err := container.GetFirstDevice(rootCtx)
 	if err != nil {
 		return err
 	}
+	blasterState.client = newBlasterClient(deviceStore)
+	go blasterConnectAndPair(blasterState.client)
+	return nil
+}
 
+// newBlasterClient — buat client + pasang event handler. Dipakai saat init DAN saat re-pair
+// setelah logout. Wajib client + device store BARU tiap re-pair: whatsmeow menghapus device
+// saat LoggedOut, jadi memakai ulang client lama → "invalid use of deleted device" (bikin QR
+// tak pernah muncul / tools mentok "Menghubungkan..."). SENGAJA tanpa case *events.Message —
+// blaster outbound-only, inbound ditangani INTI.
+func newBlasterClient(deviceStore *store.Device) *whatsmeow.Client {
 	clientLog := waLog.Stdout("BlasterClient", "INFO", true)
 	client := whatsmeow.NewClient(deviceStore, clientLog)
-	blasterState.client = client
-
-	// SENGAJA tanpa case *events.Message — blaster outbound-only, inbound ditangani INTI.
 	client.AddEventHandler(func(evt interface{}) {
 		switch evt.(type) {
 		case *events.Connected:
@@ -89,16 +102,16 @@ func initBlasterClient(rootCtx context.Context) error {
 			blasterState.setLoggedIn(false)
 			blasterState.setConnected(false)
 			blasterState.setQR("")
-			log.Println("blaster: logged out — auto re-pair: QR baru akan muncul (scan nomor blaster pengganti)")
+			log.Println("blaster: logged out — auto re-pair: bikin device baru, QR baru akan muncul")
 			go blasterRepairAfterLogout(client)
 		}
 	})
-
-	go blasterConnectAndPair(client)
-	return nil
+	return client
 }
 
-func blasterRepairAfterLogout(client *whatsmeow.Client) {
+// blasterRepairAfterLogout — setelah nomor blaster di-logout/banned, siapkan client + device
+// BARU lalu tampilkan QR pengganti. `old` = client lama (device-nya sudah dihapus) → dibuang.
+func blasterRepairAfterLogout(old *whatsmeow.Client) {
 	blasterRepairMu.Lock()
 	if blasterRepairing {
 		blasterRepairMu.Unlock()
@@ -112,8 +125,26 @@ func blasterRepairAfterLogout(client *whatsmeow.Client) {
 		blasterRepairMu.Unlock()
 	}()
 
-	client.Disconnect()
+	if old != nil {
+		old.Disconnect()
+	}
 	time.Sleep(2 * time.Second)
+
+	if blasterContainer == nil {
+		log.Println("blaster: container nil — tak bisa re-pair, restart backend.")
+		return
+	}
+	// Ambil device BARU (GetFirstDevice bikin fresh kalau store kosong setelah device lama
+	// dihapus). Client baru → pairing bersih, hindari 'invalid use of deleted device'.
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	deviceStore, err := blasterContainer.GetFirstDevice(ctx)
+	cancel()
+	if err != nil {
+		log.Printf("blaster: gagal ambil device baru utk re-pair: %v", err)
+		return
+	}
+	client := newBlasterClient(deviceStore)
+	blasterState.client = client
 	blasterConnectAndPair(client)
 }
 

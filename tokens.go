@@ -209,8 +209,17 @@ func resolveInboundThread(body, senderPhone string) (string, bool) {
 			return phone, true
 		}
 	}
-	if senderPhone != "" && (isPhoneBlasted(senderPhone) || phoneHasToken(senderPhone)) {
-		return senderPhone, true
+	if senderPhone != "" {
+		if isPhoneBlasted(senderPhone) || phoneHasToken(senderPhone) {
+			return senderPhone, true
+		}
+		// Kasus BEDA NOMOR: customer chat dari nomor lain dari yang di-blast. Pesan PERTAMA
+		// (bertoken) sudah nyangkut ke thread canonical (nomor blast) + simpan wa_jid=senderPhone.
+		// Pesan LANJUTAN tanpa token dari nomor ini harus ikut ke thread canonical itu (reverse
+		// lookup wa_jid), bukan bikin thread baru → cegah history percakapan terpecah.
+		if canonical := threadByReplyJID(senderPhone); canonical != "" {
+			return canonical, true
+		}
 	}
 	return "", false
 }
