@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Generate Kode & Link — majoo</title>
+<script src="config.js"></script>
+<style>
+  :root{
+    --bg:#0b1220; --panel:#121a2b; --panel2:#0f1626; --line:#223;
+    --text:#e6ecff; --muted:#8b97b8;
+    --teal:#2DBDB6; --lime:#9ACF87; --teal-soft:rgba(45,189,182,.15);
+    --accent2:#3b82f6; --warn:#f59e0b; --danger:#ef4444;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+  header{padding:14px 24px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:16px;background:var(--panel)}
+  header .logo{height:28px;width:auto;display:block}
+  header .sep{width:1px;height:24px;background:var(--line)}
+  header .brand{display:inline-flex;align-items:center;text-decoration:none;transition:opacity .12s}
+  header .brand:hover{opacity:.8}
+  header .brand .zlogo{height:15px;width:auto;display:block}
+  header .brand-majoo:not(.active) .logo{filter:grayscale(1) opacity(.5)}
+  .status-pill{font-size:12px;padding:4px 10px;border-radius:999px;background:#1f2937;color:var(--muted)}
+  .status-pill.ok{background:rgba(45,189,182,.2);color:var(--teal)}
+  .status-pill.err{background:#7f1d1d;color:#fecaca}
+  .user{display:flex;align-items:center;gap:10px;font-size:13px}
+  .user img{width:28px;height:28px;border-radius:50%;border:1px solid var(--line)}
+  .user .uname{line-height:1.2}
+  .user .uname b{display:block;color:var(--text)}
+  .user .uname small{color:var(--muted);font-size:11px}
+  a.ghostlink,button.ghost{background:transparent;color:var(--text);border:1px solid var(--line);padding:6px 12px;border-radius:6px;font-size:13px;text-decoration:none;cursor:pointer}
+  .subnav{padding:8px 24px;border-bottom:1px solid var(--line);background:var(--panel2);display:flex;gap:8px;align-items:center}
+  .subnav a{font-size:12px;color:var(--muted);text-decoration:none;padding:4px 10px;border-radius:6px;border:1px solid var(--line)}
+  .subnav a:hover{color:var(--teal);border-color:var(--teal)}
+  .subnav a.active{color:var(--teal);border-color:var(--teal);background:var(--teal-soft)}
+  main{max-width:1100px;margin:0 auto;padding:16px;display:grid;gap:16px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px}
+  .card h2{margin:0 0 12px;font-size:14px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
+  input[type=file]{font-size:13px;color:var(--muted)}
+  code{background:var(--panel2);padding:2px 6px;border-radius:4px;color:var(--lime);font:12px ui-monospace,Menlo,monospace}
+  button.primary{background:var(--teal);color:#0b1220;border:0;padding:10px 18px;border-radius:6px;font-weight:600;cursor:pointer;transition:filter .15s;margin-top:12px}
+  button.primary:hover:not(:disabled){filter:brightness(1.1)}
+  button.primary:disabled{opacity:.5;cursor:not-allowed}
+  .note{font-size:12.5px;color:var(--muted);background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;line-height:1.6}
+  .note b{color:var(--text)}
+  .msg{margin-top:12px;font-size:13px;padding:10px 12px;border-radius:8px;display:none}
+  .msg.ok{display:block;background:rgba(45,189,182,.12);border:1px solid var(--teal);color:var(--text)}
+  .msg.err{display:block;background:#7f1d1d33;border:1px solid var(--danger);color:#fecaca}
+  .tblwrap{overflow-x:auto;margin-top:14px;border:1px solid var(--line);border-radius:8px;display:none}
+  table{width:100%;border-collapse:collapse;font-size:12px;white-space:nowrap}
+  th,td{padding:6px 10px;border-bottom:1px solid var(--line);text-align:left;max-width:340px;overflow:hidden;text-overflow:ellipsis}
+  th{color:var(--muted);font-weight:500;background:var(--panel2);position:sticky;top:0}
+  td.kode{color:var(--lime);font-family:ui-monospace,Menlo,monospace}
+  td.link a{color:var(--accent2);text-decoration:none}
+  pre.sample{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:10px;font:12px ui-monospace,Menlo,monospace;color:var(--muted);overflow-x:auto;margin:6px 0 0}
+  .stat{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:12px 16px;min-width:150px;display:flex;flex-direction:column;gap:6px}
+  .stat-n{font-size:26px;font-weight:700;color:var(--teal)}
+  .stat-l{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+  .stat button{margin-top:4px;padding:7px 12px;font-size:12.5px}
+  .stat button:disabled{opacity:.4}
+</style>
+</head>
+<body>
+<header>
+  <a href="index.html" class="brand brand-majoo active" title="majoo"><img src="assets/majoo-logo.svg" class="logo" alt="majoo" /></a>
+  <div class="sep"></div>
+  <span id="connStatus" class="status-pill">checking...</span>
+  <span style="flex:1"></span>
+  <div class="user" id="userBox" style="visibility:hidden">
+    <img id="userAvatar" src="" alt="" />
+    <div class="uname"><b id="userName">—</b><small id="userEmail">—</small></div>
+  </div>
+  <a href="profil.html" class="ghostlink">Profil</a>
+  <button id="signoutBtn" class="ghost">Sign out</button>
+</header>
+
+<div class="subnav">
+  <a href="index.html">📤 Blast</a>
+  <a href="generate.html" class="active">🔗 Generate Kode &amp; Link</a>
+  <a href="inbox.html">📥 Inbox</a>
+  <a href="upsell.html">🛍️ Upsell</a>
+</div>
+
+<main>
+  <section class="card">
+    <h2>Generate Kode Verifikasi &amp; Link</h2>
+    <div class="note">
+      Upload CSV berisi daftar invoice. Backend membuat <b>kode verifikasi</b> (unik per <code>phone</code>+<code>nomer_invoice</code>, konsisten kalau di-generate ulang) dan <b>link</b> <code>wa.me</code> ke Nomor Inti berisi kode itu.
+      Hasilnya bisa kamu <b>download sebagai CSV</b> (kolom asli + <code>kode</code> + <code>link</code>). <b>Tidak ada pesan WA yang dikirim</b> dari sini — pengiriman kamu lakukan sendiri.
+    </div>
+
+    <div style="margin-top:16px">
+      <label>File CSV — wajib memuat kolom: <code>phone</code>, <code>nama_outlet</code>, <code>nomer_invoice</code> (kolom lain dipertahankan apa adanya)</label>
+      <input type="file" id="csv" accept=".csv,text/csv" />
+      <pre class="sample">nomer_invoice,nama_outlet,phone,tanggal,leads_id
+INV/NEW/202606/01818,Rm Dapur Mirasa,6281383154078,01/07/2026,LEADS/202605/905889</pre>
+    </div>
+
+    <button class="primary" id="genBtn" disabled>🔗 Generate &amp; Download CSV</button>
+    <div class="msg" id="msg"></div>
+
+    <div class="tblwrap" id="tblwrap">
+      <table id="tbl"><thead></thead><tbody></tbody></table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>🔁 Belum Respons — Attempt Berikutnya</h2>
+    <div class="note">
+      Diambil dari <b>histori blast</b> (termasuk data metode lama) — invoice yang sudah di-blast Attempt sebelumnya tapi <b>belum tuntas</b> (belum di-Done di Inbox) dan belum mentok Attempt 3.
+      Export → unduh CSV <code>phone,nama_outlet,nomer_invoice,kode,link</code>: kalau invoice sudah punya token dipakai <b>token lama</b>, kalau belum di-<b>generate baru</b>. Lalu kirim lewat tools kamu.
+      Sekali export, batch itu <b>tercatat ke Riwayat Blast (Audit Log)</b> sebagai Attempt 2/3 dan muncul di Log Status Update.
+    </div>
+    <div style="display:flex;gap:12px;margin-top:14px;flex-wrap:wrap">
+      <div class="stat">
+        <div class="stat-n" id="brA2">–</div>
+        <div class="stat-l">siap Attempt 2</div>
+        <button class="primary" id="expA2" disabled>⬇ Export Attempt 2</button>
+      </div>
+      <div class="stat">
+        <div class="stat-n" id="brA3">–</div>
+        <div class="stat-l">siap Attempt 3</div>
+        <button class="primary" id="expA3" disabled>⬇ Export Attempt 3</button>
+      </div>
+      <button class="ghost" id="brRefresh" style="align-self:flex-start">↻ Refresh</button>
+    </div>
+    <div class="msg" id="brMsg"></div>
+  </section>
+
+  <section class="card">
+    <h2>🧾 Riwayat</h2>
+    <div class="note">
+      Semua hasil generate/export tercatat di <b>Riwayat Blast (Audit Log)</b> dan <b>Log Status Update</b> di halaman <a href="index.html" style="color:var(--teal)">📤 Blast</a> — Attempt 1 dari upload, Attempt 2/3 dari export di atas.
+    </div>
+  </section>
+</main>
+
+<script>
+const API_BASE = (window.APP_CONFIG && window.APP_CONFIG.API_BASE) || '';
+const $ = s => document.querySelector(s);
+function apiFetch(path, opts = {}) { return fetch(API_BASE + path, { credentials: 'include', ...opts }); }
+
+// ---- auth bootstrap ----
+(async function init(){
+  if (!API_BASE) { showMsg('err', 'API_BASE belum diset di config.js.'); return; }
+  try {
+    const r = await apiFetch('/api/me');
+    if (r.status === 401) { location.href = 'login.html'; return; }
+    const me = await r.json();
+    if (!me) { location.href = 'login.html'; return; }
+    $('#userName').textContent = me.name || me.email;
+    $('#userEmail').textContent = me.email;
+    if (me.avatar) { $('#userAvatar').src = me.avatar; } else { $('#userAvatar').style.display='none'; }
+    $('#userBox').style.visibility = 'visible';
+    $('#connStatus').textContent = 'terhubung';
+    $('#connStatus').className = 'status-pill ok';
+    loadBelumRespons();
+  } catch(e) {
+    $('#connStatus').textContent = 'backend offline';
+    $('#connStatus').className = 'status-pill err';
+    showMsg('err', 'Tidak bisa konek ke backend ('+API_BASE+').');
+  }
+})();
+
+$('#signoutBtn').addEventListener('click', async () => {
+  try { await apiFetch('/auth/logout', { method:'POST' }); } catch(e){}
+  location.href = 'login.html';
+});
+
+$('#csv').addEventListener('change', () => {
+  $('#genBtn').disabled = !$('#csv').files.length;
+  hideMsg();
+});
+
+function showMsg(kind, text){ const m=$('#msg'); m.className='msg '+kind; m.textContent=text; }
+function hideMsg(){ $('#msg').className='msg'; $('#msg').textContent=''; }
+
+$('#genBtn').addEventListener('click', async () => {
+  const f = $('#csv').files[0];
+  if (!f) return;
+  const btn = $('#genBtn'); const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = '⏳ Memproses...';
+  hideMsg();
+  try {
+    const fd = new FormData(); fd.append('csv', f);
+    const r = await apiFetch('/api/generate-links', { method:'POST', body: fd });
+    if (!r.ok) { showMsg('err', 'Gagal: ' + (await r.text())); return; }
+    const total = r.headers.get('X-Rows-Total') || '?';
+    const gen = r.headers.get('X-Rows-Generated') || '?';
+    const text = await r.text();
+
+    // download
+    const blob = new Blob([text], { type:'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const stamp = new Date().toISOString().slice(0,19).replace(/[-:T]/g,'');
+    a.href = url; a.download = 'kode-link-'+stamp+'.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+
+    showMsg('ok', `✅ ${gen} dari ${total} baris di-generate. CSV ter-download. Preview di bawah.`);
+    renderPreview(text);
+    loadBelumRespons();
+  } catch(e) {
+    showMsg('err', 'Error: ' + e.message);
+  } finally {
+    btn.textContent = orig; btn.disabled = false;
+  }
+});
+
+// Preview sederhana: parse CSV hasil (buang BOM), tampilkan max 12 baris.
+function renderPreview(csvText){
+  const rows = parseCSV(csvText.replace(/^﻿/, ''));
+  if (!rows.length) return;
+  const head = rows[0];
+  const kodeIdx = head.indexOf('kode');
+  const linkIdx = head.indexOf('link');
+  const thead = $('#tbl thead'); const tbody = $('#tbl tbody');
+  thead.innerHTML = '<tr>' + head.map(h => '<th>'+esc(h)+'</th>').join('') + '</tr>';
+  tbody.innerHTML = '';
+  rows.slice(1, 13).forEach(cols => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = cols.map((c,i) => {
+      if (i === kodeIdx) return '<td class="kode">'+esc(c)+'</td>';
+      if (i === linkIdx && c) return '<td class="link"><a href="'+esc(c)+'" target="_blank" rel="noopener">'+esc(c.slice(0,48))+'…</a></td>';
+      return '<td title="'+esc(c)+'">'+esc(c)+'</td>';
+    }).join('');
+    tbody.appendChild(tr);
+  });
+  $('#tblwrap').style.display = 'block';
+}
+
+// Minimal RFC4180-ish CSV parser (cukup untuk preview; menangani quote & koma dalam quote).
+function parseCSV(text){
+  const out = []; let row = []; let cur = ''; let q = false;
+  for (let i=0;i<text.length;i++){
+    const ch = text[i];
+    if (q){
+      if (ch === '"'){ if (text[i+1] === '"'){ cur+='"'; i++; } else q=false; }
+      else cur += ch;
+    } else {
+      if (ch === '"') q = true;
+      else if (ch === ',') { row.push(cur); cur=''; }
+      else if (ch === '\n') { row.push(cur); out.push(row); row=[]; cur=''; }
+      else if (ch === '\r') { /* skip */ }
+      else cur += ch;
+    }
+  }
+  if (cur.length || row.length){ row.push(cur); out.push(row); }
+  return out.filter(r => r.length && !(r.length===1 && r[0]===''));
+}
+
+// ---- Belum Respons (Attempt 2/3) ----
+async function loadBelumRespons(){
+  try {
+    const d = await apiFetch('/api/belum-respons').then(r => r.json());
+    $('#brA2').textContent = d.attempt2;
+    $('#brA3').textContent = d.attempt3;
+    $('#expA2').disabled = !d.attempt2;
+    $('#expA3').disabled = !d.attempt3;
+  } catch(e){ /* diam saja; halaman utama tetap jalan */ }
+}
+
+async function exportAttempt(n){
+  const btn = n===2 ? $('#expA2') : $('#expA3');
+  const orig = btn.textContent; btn.disabled = true; btn.textContent = '⏳ ...';
+  const m = $('#brMsg'); m.className='msg';
+  try {
+    const r = await apiFetch('/api/belum-respons/export?attempt=' + n);
+    if (!r.ok) { m.className='msg err'; m.textContent = 'Gagal: ' + (await r.text()); return; }
+    const gen = r.headers.get('X-Rows-Generated') || '?';
+    const text = await r.text();
+    const blob = new Blob([text], { type:'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const stamp = new Date().toISOString().slice(0,19).replace(/[-:T]/g,'');
+    a.href = url; a.download = 'belum-respons-attempt'+n+'-'+stamp+'.csv';
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    m.className='msg ok'; m.textContent = `✅ ${gen} invoice di-export untuk Attempt ${n}. CSV ter-download & tercatat ke Riwayat Blast.`;
+    loadBelumRespons();
+  } catch(e){ m.className='msg err'; m.textContent = 'Error: ' + e.message; }
+  finally { btn.textContent = orig; btn.disabled = false; loadBelumRespons(); }
+}
+$('#expA2').addEventListener('click', () => exportAttempt(2));
+$('#expA3').addEventListener('click', () => exportAttempt(3));
+$('#brRefresh').addEventListener('click', loadBelumRespons);
+
+function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+</script>
+</body>
+</html>
