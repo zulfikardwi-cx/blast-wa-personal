@@ -641,33 +641,19 @@ async function loadMessages(scrollBottom) {
 // Thread baru pindah ke Done SETELAH agent menekan Kirim (lihat sendReply).
 $('#actDone').addEventListener('click', async () => {
   if (!currentPhone) return;
-  // Kalau customer BELUM pernah membalas ke nomor Inti (mis. thread After Blast), nomor Inti
-  // TIDAK bisa mengirim pesan penutup ke dia — WhatsApp memblokir kontak dingin (error 463).
-  // Jadi tutup sebagai Done/Resolved TANPA kirim pesan penutup.
-  if (!currentHasInbound) {
-    const msg = currentHasWebConfirm
-      ? 'Customer sudah konfirmasi via halaman web (bukan chat WA), jadi tak ada percakapan WhatsApp untuk dikirimi pesan penutup.\n\nTutup thread ini sebagai Done / Resolved TANPA kirim pesan?'
-      : 'Customer belum pernah membalas ke nomor Inti, jadi pesan penutup tidak bisa dikirim (akan error 463).\n\nTutup thread ini sebagai Done / Resolved TANPA kirim pesan?';
-    if (!confirm(msg)) return;
-    $('#actDone').disabled = true;
-    try {
-      const fd = new FormData(); fd.append('status', 'done');
-      const r = await apiFetch(`/api/inbox/status?phone=${encodeURIComponent(currentPhone)}`, { method: 'POST', body: fd });
-      if (!r.ok) { alert('Gagal: ' + await r.text()); return; }
-      toast('✅ Ditutup sebagai Done/Resolved (tanpa pesan penutup).');
-      await loadMessages(false); loadThreads();
-    } finally { $('#actDone').disabled = false; }
-    return;
-  }
-  // Ada percakapan → muat pesan penutup untuk dikirim & tutup.
-  const ta = $('#replyText');
-  ta.value = closingTemplateText || '';
-  ta.style.height = 'auto';
-  ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
-  ta.focus();
-  pendingDone = true;
-  $('#sendBtn').textContent = 'Kirim & Tutup';
-  toast('✏️ Closing message dimuat. Edit bila perlu, lalu "Kirim & Tutup" untuk menutup thread.');
+  // Done/Resolved menutup thread TANPA mengirim pesan penutup. Alur validasi baru (blast via
+  // Tools Resmi + konfirmasi web, tim validator hubungi customer langsung) tidak butuh pesan
+  // penutup dari nomor Inti — lagipula kirim ke kontak yang tak aktif chat = error 463.
+  // Kalau agent MAU kirim penutup, ketik di kotak balasan lalu "Kirim" dulu, baru Done.
+  if (!confirm('Tutup thread ini sebagai Done / Resolved?\n\nTidak ada pesan penutup yang dikirim ke customer.')) return;
+  $('#actDone').disabled = true;
+  try {
+    const fd = new FormData(); fd.append('status', 'done');
+    const r = await apiFetch(`/api/inbox/status?phone=${encodeURIComponent(currentPhone)}`, { method: 'POST', body: fd });
+    if (!r.ok) { alert('Gagal: ' + await r.text()); return; }
+    toast('✅ Ditutup sebagai Done/Resolved (tanpa pesan penutup).');
+    await loadMessages(false); loadThreads();
+  } finally { $('#actDone').disabled = false; }
 });
 
 // Invalid — nomor salah / perlu revisi. Tidak kirim pesan, pindah ke bucket Invalid.
