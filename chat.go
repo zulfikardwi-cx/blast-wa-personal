@@ -861,9 +861,21 @@ func handleReply(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 	defer cancel()
 
+	// Bootstrap sesi utk KONTAK BARU (samakan dgn jalur blast sendOne): resolve LID +
+	// prefetch device list. Tanpa ini, kirim ke nomor yang belum pernah ada sesi (mis.
+	// customer konfirmasi via web) bisa gagal/undecryptable. Non-fatal — tetap coba kirim.
+	jid = resolveToLID(ctx, state.client, jid)
+	if _, e := state.client.GetUserDevicesContext(ctx, []types.JID{jid}); e != nil {
+		fmt.Println("warn: reply prefetch devices for", phone, ":", e)
+	}
+
 	msg := &waProto.Message{Conversation: proto.String(body)}
 	res, err := state.client.SendMessage(ctx, jid, msg)
 	if err != nil {
+		if is463Err(err) {
+			httpErr(w, 400, "WhatsApp menolak kirim (error 463 / anti-spam). Nomor Inti tidak bisa mengirim pesan ke customer yang belum pernah chat ke Inti (mis. konfirmasi via web) — WhatsApp memblokir 'kontak dingin' & bisa memicu ban. Hubungi customer via WhatsApp Call, atau kirim follow-up lewat Tools Blast Resmi (template WABA).")
+			return
+		}
 		httpErr(w, 500, "send: %v", err)
 		return
 	}
