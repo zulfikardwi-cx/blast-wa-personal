@@ -156,6 +156,8 @@ func main() {
 	mux.HandleFunc("/api/generate-links", corsMiddleware(requireAuth(handleGenerateLinks)))
 	mux.HandleFunc("/api/belum-respons", corsMiddleware(requireAuth(handleBelumResponsStats)))
 	mux.HandleFunc("/api/belum-respons/export", corsMiddleware(requireAuth(handleBelumResponsExport)))
+	// PUBLIK (tanpa login): customer konfirmasi kode referensi dari halaman web.
+	mux.HandleFunc("/api/konfirmasi", corsMiddleware(handleKonfirmasi))
 	mux.HandleFunc("/api/progress", corsMiddleware(requireAuth(handleProgress)))
 	mux.HandleFunc("/api/history", corsMiddleware(requireAuth(handleHistory)))
 	mux.HandleFunc("/api/sheet-status", corsMiddleware(requireAuth(handleSheetStatus)))

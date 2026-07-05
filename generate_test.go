@@ -48,32 +48,31 @@ func TestGenerateLinks_PreservesColumnsAndAppendsKodeLink(t *testing.T) {
 	if len(lines) != 3 {
 		t.Fatalf("expected 3 lines (header+2), got %d: %q", len(lines), out)
 	}
-	// Header: kolom asli dipertahankan + kode + link di akhir.
-	wantHeader := "nomer_invoice,nama_outlet,phone,tanggal,leads_id,kode,link"
-	if lines[0] != wantHeader {
-		t.Errorf("header = %q, want %q", lines[0], wantHeader)
+	// Header FIXED (format Tools Blast Resmi Majoo), bukan kolom asli.
+	if lines[0] != "phone,full_name,nick_name,gender,package" {
+		t.Errorf("header = %q", lines[0])
 	}
-	// Baris 1: kolom asli utuh, kode 8 char, link wa.me ke Inti.
+	// Baris 1 dipetakan: phone(normalisasi), full_name=outlet, nick_name=invoice,
+	// gender=kode (8 char), package kosong.
 	cols := strings.Split(lines[1], ",")
-	if cols[0] != "INV/NEW/202606/01818" || cols[1] != "Rm Dapur Mirasa" {
-		t.Errorf("original columns not preserved: %v", cols)
+	if len(cols) != 5 {
+		t.Fatalf("kolom = %d, want 5: %v", len(cols), cols)
 	}
-	if cols[4] != "LEADS/1" {
-		t.Errorf("extra column leads_id dropped: %v", cols)
+	if cols[0] != "6281383154078" {
+		t.Errorf("phone = %q, want 6281383154078 (normalisasi 0→62)", cols[0])
 	}
-	kode := cols[5]
-	if len(kode) != tokenLen {
-		t.Errorf("kode len = %d (%q), want %d", len(kode), kode, tokenLen)
+	if cols[1] != "Rm Dapur Mirasa" {
+		t.Errorf("full_name = %q, want outlet", cols[1])
 	}
-	link := strings.Join(cols[6:], ",") // link mungkin mengandung koma ter-escape; ambil sisanya
-	if !strings.Contains(link, "wa.me/6285119012345") {
-		t.Errorf("link tidak menunjuk ke Inti: %q", link)
+	if cols[2] != "INV/NEW/202606/01818" {
+		t.Errorf("nick_name = %q, want invoice", cols[2])
 	}
-	if !strings.Contains(link, kode) {
-		t.Errorf("link tidak memuat kode %q: %q", kode, link)
+	if len(cols[3]) != tokenLen {
+		t.Errorf("gender(kode) len = %d (%q), want %d", len(cols[3]), cols[3], tokenLen)
 	}
-	t.Logf("row1 kode=%s link=%s", kode, link)
-
+	if cols[4] != "" {
+		t.Errorf("package harus kosong, got %q", cols[4])
+	}
 	if h := rec.Header().Get("X-Rows-Generated"); h != "2" {
 		t.Errorf("X-Rows-Generated = %q, want 2", h)
 	}

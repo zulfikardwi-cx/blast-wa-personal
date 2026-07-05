@@ -75,9 +75,9 @@ func handleGenerateLinks(w http.ResponseWriter, r *http.Request) {
 	buf.WriteString("\ufeff") // BOM supaya Excel baca UTF-8 (nama outlet non-ASCII aman)
 	cw := csv.NewWriter(&buf)
 
-	// Header keluaran = header asli + kode + link.
-	out := append(cleanHeader(header), "kode", "link")
-	if err := cw.Write(out); err != nil {
+	// Header keluaran FIXED (format Tools Blast Resmi Majoo). Data kita dipetakan posisional:
+	// phone→phone, nama_outlet→full_name, nomer_invoice→nick_name, kode→gender, package kosong.
+	if err := cw.Write([]string{"phone", "full_name", "nick_name", "gender", "package"}); err != nil {
 		httpErr(w, 500, "write header: %v", err)
 		return
 	}
@@ -113,10 +113,9 @@ func handleGenerateLinks(w http.ResponseWriter, r *http.Request) {
 			invoice = strings.TrimSpace(rec[ii])
 		}
 
-		kode, link := "", ""
+		kode := ""
 		if phone != "" {
 			kode = getOrCreateToken(phone, invoice, outlet)
-			link = buildTriggerLink(phone, invoice, outlet, kode)
 			generated++
 			// Catat Attempt 1 ke Riwayat Blast + buat thread after_blast (kalau baru).
 			body := applyLink(renderTemplateWithVars(GetAttemptTemplate(1), outlet, invoice), phone, invoice, outlet)
@@ -126,7 +125,8 @@ func handleGenerateLinks(w http.ResponseWriter, r *http.Request) {
 				_ = recordChatMessage(phone, "out", body, "", "", now, logID, user.Email, user.Name)
 			}
 		}
-		if err := cw.Write(append(padRecord(rec, len(header)), kode, link)); err != nil {
+		// Baris FIXED: phone, full_name(outlet), nick_name(invoice), gender(kode), package(kosong).
+		if err := cw.Write([]string{phone, outlet, invoice, kode, ""}); err != nil {
 			httpErr(w, 500, "write row: %v", err)
 			return
 		}
@@ -153,22 +153,3 @@ func handleGenerateLinks(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(buf.Bytes())
 }
 
-// cleanHeader — trim + buang BOM di tiap nama kolom header asli.
-func cleanHeader(h []string) []string {
-	out := make([]string, len(h))
-	for i, c := range h {
-		out[i] = strings.TrimPrefix(strings.TrimSpace(c), "\ufeff")
-	}
-	return out
-}
-
-// padRecord — pastikan record punya panjang minimal n (baris pendek di-pad "")
-// supaya kolom kode/link selalu jatuh di posisi yang sama dengan header.
-func padRecord(rec []string, n int) []string {
-	if len(rec) >= n {
-		return rec
-	}
-	out := make([]string, n)
-	copy(out, rec)
-	return out
-}

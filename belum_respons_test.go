@@ -100,15 +100,16 @@ func TestBelumRespons_ExportRecordsToRiwayat(t *testing.T) {
 	if len(lines) != 2 { // header + hanya INV-A
 		t.Fatalf("expected header+1, got %d: %q", len(lines), out)
 	}
-	if lines[0] != "phone,nama_outlet,nomer_invoice,kode,link" {
+	if lines[0] != "phone,full_name,nick_name,gender,package" {
 		t.Errorf("header salah: %q", lines[0])
 	}
 	cols := strings.SplitN(lines[1], ",", 5)
+	// phone, full_name(outlet), nick_name(invoice=INV-A), gender(kode), package kosong
 	if cols[0] != "6281" || cols[2] != "INV-A" || len(cols[3]) != tokenLen {
 		t.Errorf("row salah: %v", cols)
 	}
-	if !strings.Contains(cols[4], "wa.me/6285119012345") || !strings.Contains(cols[4], cols[3]) {
-		t.Errorf("link salah: %q", cols[4])
+	if cols[4] != "" {
+		t.Errorf("package harus kosong: %q", cols[4])
 	}
 
 	// Tercatat ke Riwayat Blast sebagai attempt 2 'sent'

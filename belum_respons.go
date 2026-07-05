@@ -77,13 +77,14 @@ func handleBelumResponsExport(w http.ResponseWriter, r *http.Request) {
 	var buf bytes.Buffer
 	buf.WriteString("\ufeff")
 	cw := csv.NewWriter(&buf)
-	_ = cw.Write([]string{"phone", "nama_outlet", "nomer_invoice", "kode", "link"})
+	// Header FIXED (format Tools Blast Resmi Majoo): phone, full_name(outlet),
+	// nick_name(invoice), gender(kode), package(kosong).
+	_ = cw.Write([]string{"phone", "full_name", "nick_name", "gender", "package"})
 
 	n := 0
 	for _, x := range batch {
 		token := getOrCreateToken(x.phone, x.nomerInvoice, x.namaOutlet)
-		link := buildTriggerLink(x.phone, x.nomerInvoice, x.namaOutlet, token)
-		if err := cw.Write([]string{x.phone, x.namaOutlet, x.nomerInvoice, token, link}); err != nil {
+		if err := cw.Write([]string{x.phone, x.namaOutlet, x.nomerInvoice, token, ""}); err != nil {
 			httpErr(w, 500, "write: %v", err)
 			return
 		}
