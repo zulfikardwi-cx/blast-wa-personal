@@ -31,6 +31,8 @@
   .msg.ok{display:block;background:#e7f7f5;border:1px solid #b7e6e1;color:#0c5;color:var(--ok)}
   .msg.err{display:block;background:#fdecec;border:1px solid #f7c9cb;color:var(--danger)}
   .msg .big{font-size:16px;font-weight:700;display:block;margin-bottom:4px}
+  .wabtn{display:block;margin-top:14px;padding:13px;border-radius:11px;background:#25D366;color:#fff;font-weight:700;text-decoration:none;text-align:center}
+  .wabtn:hover{filter:brightness(1.05)}
   .foot{margin-top:22px;text-align:center;color:var(--muted);font-size:12px}
   .hint{color:var(--muted);font-size:12.5px;margin-top:8px}
 </style>
@@ -73,11 +75,16 @@ form.addEventListener('submit', async (e) => {
     });
     const d = await r.json();
     if (d.ok) {
+      form.style.display = 'none';
+      const waLink = d.wa_link || '';
       show('ok', '<span class="big">✅ Konfirmasi berhasil!</span>' +
         'Terima kasih' + (d.nama_outlet ? ', <b>' + esc(d.nama_outlet) + '</b>' : '') + '.' +
         (d.nomer_invoice ? '<br/>Invoice: <b>' + esc(d.nomer_invoice) + '</b>' : '') +
-        '<br/>Tim Validator majoo akan segera menghubungi Anda melalui WhatsApp.');
-      form.style.display = 'none';
+        (waLink
+          ? '<br/><br/>Anda akan diarahkan ke WhatsApp untuk terhubung dengan Tim Validator kami. Jika tidak terbuka otomatis, tekan tombol di bawah lalu <b>kirim pesannya</b>.' +
+            '<a class="wabtn" href="' + esc(waLink) + '">💬 Lanjut ke WhatsApp</a>'
+          : '<br/>Tim Validator majoo akan segera menghubungi Anda melalui WhatsApp.'));
+      if (waLink) setTimeout(() => { window.location.href = waLink; }, 1500);
     } else {
       show('err', esc(d.error || 'Kode tidak valid.'));
       btn.disabled = false; btn.textContent = orig;

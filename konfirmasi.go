@@ -131,5 +131,10 @@ func handleKonfirmasi(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, map[string]any{"ok": true, "nama_outlet": outlet, "nomer_invoice": invoice})
+	// Link wa.me ke INTI dengan pesan prefilled (Kode Referensi) — customer diarahkan chat
+	// ke Inti setelah konfirmasi supaya Inti dapat inbound ASLI (window terbuka → validator
+	// bisa balas normal, tak kena 463). Token asli dipakai (bukan input mentah).
+	waLink := buildTriggerLink(phone, invoice, outlet, token)
+
+	writeJSON(w, map[string]any{"ok": true, "nama_outlet": outlet, "nomer_invoice": invoice, "wa_link": waLink})
 }
