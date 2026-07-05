@@ -370,6 +370,7 @@ let currentHasInbound = false; // apakah thread aktif punya pesan MASUK ASLI dar
 let currentHasWebConfirm = false; // customer konfirmasi via halaman web (bukan chat WA)
 let currentBucket = 'after_blast';
 const WEB_CONFIRM_PREFIX = '[Konfirmasi Validasi via Web]';
+let currentOutlet = '', currentInvoice = '', currentKode = ''; // data thread aktif utk isi macro
 let currentTeam = '';
 let closingTemplateText = '';
 let pendingDone = false;
@@ -531,6 +532,9 @@ async function loadMessages(scrollBottom) {
   try {
     const r = await apiFetch(`/api/inbox/messages?phone=${encodeURIComponent(currentPhone)}`).then(r => r.json());
     closingTemplateText = r.closing_template || '';
+    currentOutlet = r.nama_outlet || '';
+    currentInvoice = r.nomer_invoice || '';
+    currentKode = r.kode || '';
     const nama = r.nama_outlet || '(no outlet)';
     $('#hName').textContent = nama;
     $('#hPhone').textContent = '+' + currentPhone;
@@ -767,7 +771,7 @@ $('#actReopen').addEventListener('click', async () => {
 // ---- Macro quick-reply: sisipkan template ke kotak balasan utk diedit lalu kirim ----
 const MACROS = [
   { label: 'Validasi sekarang via WA call?',
-    text: 'Baik kak, apakah berkenan kami lakukan validasi sekarang via whatsapp call? mohon konfirmasinya ya kak' },
+    text: 'Halo Kak, kami dari team validator majoo.\nIngin follow up bahwa kami mendapatkan konfirmasi validasi dari nomer invoice :\nNama Outlet: {{nama_outlet}}\nNo. Invoice: {{nomer_invoice}}\nNomor Referensi: {{kode}}\nApakah berkenan kami lakukan validasi sekarang via whatsapp call?' },
   { label: 'Tim validator akan menghubungi (tunggu)',
     text: 'Baik kak, nantinya tim validator kami akan menghubungi kakak via whatsapp call. Mohon kesediaannya untuk menunggu. Terima kasih' },
   { label: 'Follow up — belum ada respon validasi',
@@ -778,15 +782,23 @@ const MACROS = [
     text: 'Halo kak, sesuai informasi sebelumnya, untuk aktivasinya sudah selesai kami lakukan dengan data sebagai berikut:\n\nNama Outlet : \nEmail : \nJenis Aktivasi : New/Tambah Cabang\n\nTerima kasih' },
 ];
 
+// Isi placeholder macro dengan data thread aktif (dari backend yang terkonfirmasi).
+function fillMacro(text) {
+  return text
+    .replace(/\{\{nama_outlet\}\}/g, currentOutlet || '-')
+    .replace(/\{\{nomer_invoice\}\}/g, currentInvoice || '-')
+    .replace(/\{\{kode\}\}/g, currentKode || '-');
+}
+
 function buildMacroMenu() {
   const menu = $('#macroMenu');
   menu.innerHTML = MACROS.map((m, i) =>
-    `<div class="macro-item" data-i="${i}"><span class="mt">${esc(m.label)}</span><span class="mp">${esc(m.text.replace(/\n+/g, ' '))}</span></div>`
+    `<div class="macro-item" data-i="${i}"><span class="mt">${esc(m.label)}</span><span class="mp">${esc(fillMacro(m.text).replace(/\n+/g, ' '))}</span></div>`
   ).join('');
   menu.querySelectorAll('.macro-item').forEach(el => {
     el.addEventListener('click', () => {
       const ta = $('#replyText');
-      ta.value = MACROS[+el.dataset.i].text;
+      ta.value = fillMacro(MACROS[+el.dataset.i].text);
       ta.style.height = 'auto';
       ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
       ta.focus();

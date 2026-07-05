@@ -653,6 +653,21 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 	var nama, status, assignedEmail, assignedName, followupAt, nomerInvoice, blastPhone string
 	_ = auditDB.QueryRow(`SELECT COALESCE(nama_outlet,''), status, COALESCE(assigned_email,''), COALESCE(assigned_name,''), COALESCE(followup_at,''), COALESCE(nomer_invoice,''), COALESCE(blast_phone,'') FROM chat_threads WHERE phone = ?`, phone).Scan(&nama, &status, &assignedEmail, &assignedName, &followupAt, &nomerInvoice, &blastPhone)
 
+	// Kode Referensi (token) untuk invoice thread ini — dipakai macro quick-reply validator.
+	// Token dibuat utk nomor yang DI-BLAST; thread hasil match manual menyimpannya di blast_phone.
+	// Coba blast_phone dulu (thread matched), lalu phone thread (thread blast biasa).
+	kodeRef := ""
+	if nomerInvoice != "" {
+		for _, p := range []string{blastPhone, phone} {
+			if p == "" {
+				continue
+			}
+			if err := auditDB.QueryRow(`SELECT token FROM validation_tokens WHERE phone=? AND nomer_invoice=?`, p, nomerInvoice).Scan(&kodeRef); err == nil && kodeRef != "" {
+				break
+			}
+		}
+	}
+
 	writeJSON(w, map[string]any{
 		"phone":            phone,
 		"nama_outlet":      nama,
@@ -662,6 +677,7 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 		"followup_at":      followupAt,
 		"nomer_invoice":    nomerInvoice,
 		"blast_phone":      blastPhone,
+		"kode":             kodeRef,
 		"messages":         out,
 		"closing_template": renderClosingTemplate(nama),
 	})
