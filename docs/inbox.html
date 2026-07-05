@@ -366,8 +366,10 @@
 const API_BASE = (window.APP_CONFIG && window.APP_CONFIG.API_BASE) || '';
 let me = null;
 let currentPhone = null;
-let currentHasInbound = false; // apakah thread aktif punya pesan MASUK dari customer
+let currentHasInbound = false; // apakah thread aktif punya pesan MASUK ASLI dari customer (WA)
+let currentHasWebConfirm = false; // customer konfirmasi via halaman web (bukan chat WA)
 let currentBucket = 'after_blast';
+const WEB_CONFIRM_PREFIX = '[Konfirmasi Validasi via Web]';
 let currentTeam = '';
 let closingTemplateText = '';
 let pendingDone = false;
@@ -602,7 +604,11 @@ async function loadMessages(scrollBottom) {
     }
 
     const msgs = r.messages || [];
-    currentHasInbound = msgs.some(m => m.direction === 'in');
+    // Penanda konfirmasi via web (direction 'in' sintetis) BUKAN balasan WA asli — Inti tak bisa
+    // kirim pesan penutup ke nomor yang tak pernah chat WA (kontak dingin → error 463). Jadi
+    // jangan dihitung sebagai inbound utk keputusan kirim closing.
+    currentHasWebConfirm = msgs.some(m => m.direction === 'in' && (m.body || '').startsWith(WEB_CONFIRM_PREFIX));
+    currentHasInbound = msgs.some(m => m.direction === 'in' && !(m.body || '').startsWith(WEB_CONFIRM_PREFIX));
     const newMaxID = msgs.length ? msgs[msgs.length-1].id : 0;
     if (newMaxID === lastMessageID && $('#messages').children.length > 0) return;
     lastMessageID = newMaxID;
@@ -639,7 +645,10 @@ $('#actDone').addEventListener('click', async () => {
   // TIDAK bisa mengirim pesan penutup ke dia — WhatsApp memblokir kontak dingin (error 463).
   // Jadi tutup sebagai Done/Resolved TANPA kirim pesan penutup.
   if (!currentHasInbound) {
-    if (!confirm('Customer belum pernah membalas ke nomor Inti, jadi pesan penutup tidak bisa dikirim (akan error 463).\n\nTutup thread ini sebagai Done / Resolved TANPA kirim pesan?')) return;
+    const msg = currentHasWebConfirm
+      ? 'Customer sudah konfirmasi via halaman web (bukan chat WA), jadi tak ada percakapan WhatsApp untuk dikirimi pesan penutup.\n\nTutup thread ini sebagai Done / Resolved TANPA kirim pesan?'
+      : 'Customer belum pernah membalas ke nomor Inti, jadi pesan penutup tidak bisa dikirim (akan error 463).\n\nTutup thread ini sebagai Done / Resolved TANPA kirim pesan?';
+    if (!confirm(msg)) return;
     $('#actDone').disabled = true;
     try {
       const fd = new FormData(); fd.append('status', 'done');

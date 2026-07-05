@@ -20,8 +20,8 @@
   h1{font-size:19px;margin:4px 0 6px}
   p.sub{color:var(--muted);font-size:14px;margin:0 0 20px}
   label{display:block;font-size:13px;color:var(--muted);margin:0 0 6px;font-weight:600}
-  input{width:100%;padding:14px 16px;border:1.5px solid var(--line);border-radius:11px;font-size:20px;
-    letter-spacing:3px;text-transform:uppercase;text-align:center;font-family:ui-monospace,Menlo,monospace;color:var(--ink)}
+  input{width:100%;padding:14px 16px;border:1.5px solid var(--line);border-radius:11px;font-size:16px;
+    letter-spacing:1px;text-transform:uppercase;text-align:center;font-family:ui-monospace,Menlo,monospace;color:var(--ink)}
   input:focus{outline:none;border-color:var(--teal)}
   button{width:100%;margin-top:16px;padding:14px;border:0;border-radius:11px;background:var(--teal);color:#fff;
     font-size:16px;font-weight:700;cursor:pointer;transition:background .15s}
@@ -39,13 +39,13 @@
   <div class="card">
     <div class="brand"><img src="assets/majoo-logo.svg" alt="majoo" class="logo" /></div>
     <h1>Konfirmasi Validasi</h1>
-    <p class="sub">Masukkan <b>Kode Referensi</b> yang Anda terima pada pesan WhatsApp untuk mengonfirmasi bahwa Anda siap melakukan validasi. Tim Validator kami akan menghubungi Anda.</p>
+    <p class="sub">Masukkan <b>Nomor Invoice</b> atau <b>Kode Referensi</b> yang Anda terima pada pesan WhatsApp untuk mengonfirmasi bahwa Anda siap melakukan validasi. Tim Validator kami akan menghubungi Anda.</p>
 
     <form id="form">
-      <label for="kode">Kode Referensi</label>
+      <label for="kode">Nomor Invoice atau Kode Referensi</label>
       <input id="kode" name="kode" autocomplete="off" autocapitalize="characters" spellcheck="false"
-             inputmode="latin" maxlength="16" placeholder="Contoh: HWYTSJJU" required />
-      <div class="hint">8 karakter huruf & angka.</div>
+             inputmode="latin" maxlength="40" placeholder="Nomor invoice atau kode referensi" required />
+      <div class="hint">Contoh: INV/NEW/202606/01226 atau HWYTSJJU</div>
       <button id="btn" type="submit">Konfirmasi</button>
     </form>
 

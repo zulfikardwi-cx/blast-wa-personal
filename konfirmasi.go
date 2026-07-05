@@ -97,20 +97,25 @@ func handleKonfirmasi(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
 		kode = r.FormValue("kode")
 	}
-	kode = strings.ToUpper(strings.TrimSpace(kode))
-	if kode == "" {
-		writeJSON(w, map[string]any{"ok": false, "error": "Kode belum diisi."})
+	input := strings.ToUpper(strings.TrimSpace(kode))
+	if input == "" {
+		writeJSON(w, map[string]any{"ok": false, "error": "Nomor Invoice atau Kode Referensi belum diisi."})
 		return
 	}
 
-	phone, invoice, outlet, ok := lookupToken(kode)
+	// Terima Kode Referensi (token) ATAU Nomor Invoice.
+	phone, invoice, outlet, ok := lookupToken(input)
+	token := input
 	if !ok || phone == "" {
-		writeJSON(w, map[string]any{"ok": false, "error": "Kode Referensi tidak ditemukan. Periksa kembali."})
+		phone, invoice, outlet, token, ok = lookupByInvoice(input)
+	}
+	if !ok || phone == "" {
+		writeJSON(w, map[string]any{"ok": false, "error": "Informasi invoice atau kode referensi anda tidak valid."})
 		return
 	}
 
 	now := time.Now()
-	body := fmt.Sprintf("[Konfirmasi Validasi via Web] Kode %s — Customer siap divalidasi (Invoice %s).", kode, invoice)
+	body := fmt.Sprintf("[Konfirmasi Validasi via Web] Kode %s — Customer siap divalidasi (Invoice %s).", token, invoice)
 
 	// Idempoten: hanya catat penanda & pindah bucket sekali. Kalau sudah pernah konfirmasi,
 	// tetap balas sukses tanpa dobel penanda / dobel unread.

@@ -55,11 +55,38 @@ func TestKonfirmasi_ValidCodeMovesThreadToOpen(t *testing.T) {
 	}
 }
 
+func TestKonfirmasi_ByInvoiceNumber(t *testing.T) {
+	setupBlastHistoryDB(t)
+	seedTokenRow(t, "HWYTSJJU", "6285702526099", "INV/NEW/202606/01226", "Drip n Dine")
+	if _, err := auditDB.Exec(`INSERT INTO chat_threads (phone,status) VALUES ('6285702526099','after_blast')`); err != nil {
+		t.Fatal(err)
+	}
+	// Pakai NOMOR INVOICE, bukan kode.
+	rec := postKonfirmasi("INV/NEW/202606/01226")
+	if !strings.Contains(rec.Body.String(), `"ok":true`) || !strings.Contains(rec.Body.String(), "Drip n Dine") {
+		t.Fatalf("konfirmasi via invoice gagal: %s", rec.Body.String())
+	}
+	var status string
+	auditDB.QueryRow(`SELECT status FROM chat_threads WHERE phone='6285702526099'`).Scan(&status)
+	if status != "open" {
+		t.Errorf("status = %q, want open", status)
+	}
+	// Penanda tetap pakai TOKEN (bukan nomor invoice mentah).
+	var n int
+	auditDB.QueryRow(`SELECT COUNT(*) FROM chat_messages WHERE phone='6285702526099' AND body LIKE '%Kode HWYTSJJU%'`).Scan(&n)
+	if n != 1 {
+		t.Errorf("penanda harus memuat token HWYTSJJU, n=%d", n)
+	}
+}
+
 func TestKonfirmasi_InvalidCode(t *testing.T) {
 	setupBlastHistoryDB(t)
 	rec := postKonfirmasi("ZZZZ9999")
 	if !strings.Contains(rec.Body.String(), `"ok":false`) {
 		t.Errorf("kode invalid harusnya ok:false, got %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "tidak valid") {
+		t.Errorf("pesan error harus 'tidak valid', got %s", rec.Body.String())
 	}
 }
 

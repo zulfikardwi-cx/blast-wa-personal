@@ -198,6 +198,23 @@ func lookupToken(token string) (phone, invoice, outlet string, ok bool) {
 	return phone, invoice, outlet, true
 }
 
+// lookupByInvoice — cari konteks (token+phone+outlet) dari NOMOR INVOICE. Dipakai halaman
+// konfirmasi supaya customer bisa masukkan Nomor Invoice ATAU Kode Referensi. Ambil entri
+// terbaru bila satu invoice terpetakan ke >1 (jarang).
+func lookupByInvoice(invoiceIn string) (phone, invoice, outlet, token string, ok bool) {
+	invoiceIn = strings.TrimSpace(invoiceIn)
+	if invoiceIn == "" {
+		return "", "", "", "", false
+	}
+	err := auditDB.QueryRow(`SELECT token, phone, COALESCE(nomer_invoice,''), COALESCE(nama_outlet,'')
+		FROM validation_tokens WHERE nomer_invoice = ? ORDER BY created_at DESC LIMIT 1`, invoiceIn).
+		Scan(&token, &phone, &invoice, &outlet)
+	if err != nil {
+		return "", "", "", "", false
+	}
+	return phone, invoice, outlet, token, true
+}
+
 // resolveInboundThread — tentukan canonical phone (key thread INTI) untuk pesan masuk.
 //  1. Token di teks ("Kode Referensi") → phone dari validation_tokens (paling presisi;
 //     jalan walau pelanggan chat dari nomor beda).

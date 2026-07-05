@@ -114,22 +114,40 @@ func handleBelumResponsExport(w http.ResponseWriter, r *http.Request) {
 
 // ---- Perekaman Attempt 1 (dipakai handleGenerateLinks) ----
 
-// ensureThreadAfterBlast — buat thread 'after_blast' HANYA kalau belum ada. ON
-// CONFLICT DO NOTHING supaya thread yang sudah maju (sudah balas / attempt lebih
-// tinggi) TIDAK diklobrak balik ke after_blast/attempt 1.
+// ensureThreadAfterBlast — buat/REAKTIVASI thread ke 'after_blast' saat di-blast Attempt 1,
+// supaya muncul di Inbox bucket After Blast (seperti blast lama). Thread yang sedang DITANGANI
+// (customer sudah balas / validator kerjakan: open/in_progress/on_going/scheduled) TIDAK
+// diganggu. Selain itu (done/force_close/invalid/rejected/baru) di-reaktivasi ke after_blast +
+// current_attempt reset ke 1.
 func ensureThreadAfterBlast(phone, outlet, invoice string, logID int64, preview string, ts time.Time) {
 	tsStr := ts.Format(time.RFC3339)
+	prev := truncate(preview, 80)
+	const keep = `status IN ('open','in_progress','on_going','scheduled')`
 	_, _ = auditDB.Exec(`
 INSERT INTO chat_threads (phone, nama_outlet, nomer_invoice, last_blast_id, last_message_at, last_message_preview, last_message_direction, status, unread_count, current_attempt, last_attempt_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?, 'out', 'after_blast', 0, 1, ?, ?)
-ON CONFLICT(phone) DO NOTHING`,
-		phone, outlet, invoice, nullableID(logID), tsStr, truncate(preview, 80), tsStr, tsStr)
+ON CONFLICT(phone) DO UPDATE SET
+	nama_outlet = COALESCE(NULLIF(excluded.nama_outlet,''), nama_outlet),
+	nomer_invoice = COALESCE(NULLIF(excluded.nomer_invoice,''), nomer_invoice),
+	last_blast_id = COALESCE(excluded.last_blast_id, last_blast_id),
+	last_message_at = excluded.last_message_at,
+	last_message_preview = excluded.last_message_preview,
+	last_message_direction = 'out',
+	status = CASE WHEN `+keep+` THEN status ELSE 'after_blast' END,
+	current_attempt = CASE WHEN `+keep+` THEN current_attempt ELSE 1 END,
+	unread_count = CASE WHEN `+keep+` THEN unread_count ELSE 0 END,
+	updated_at = excluded.updated_at`,
+		phone, outlet, invoice, nullableID(logID), tsStr, prev, tsStr, tsStr)
 }
 
 // recordAttempt1Sent — catat 1 invoice sebagai Attempt 1 'sent' ke Riwayat Blast +
 // buat thread. Anti-dobel: skip kalau invoice ini sudah pernah tercatat attempt 1
 // 'sent' (mis. data metode lama / re-upload). Return true kalau baru direkam.
 func recordAttempt1Sent(logID int64, phone, outlet, invoice, body string, now time.Time) bool {
+	// SELALU reaktivasi thread ke after_blast (biar blast muncul di Inbox After Blast),
+	// walau invoice-nya sudah pernah tercatat attempt 1 (mis. re-blast / data lama).
+	ensureThreadAfterBlast(phone, outlet, invoice, logID, body, now)
+	// Anti-dobel: catat blast_recipients attempt-1 HANYA kalau belum ada (cegah entri Riwayat ganda).
 	var c int
 	_ = auditDB.QueryRow(`
 SELECT COUNT(*) FROM blast_recipients r JOIN blast_logs b ON r.blast_log_id=b.id
@@ -139,6 +157,5 @@ WHERE r.phone=? AND COALESCE(r.nomer_invoice,'')=COALESCE(?,'') AND r.status='se
 		return false
 	}
 	_ = recordRetryRecipient(logID, phone, outlet, invoice, "sent", "", body, now)
-	ensureThreadAfterBlast(phone, outlet, invoice, logID, body, now)
 	return true
 }
