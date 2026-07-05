@@ -213,11 +213,11 @@ WHERE NOT EXISTS (SELECT 1 FROM chat_threads t WHERE t.phone = r.phone)`)
 
 var attemptTemplates [3]string
 
-// CATATAN: ATTEMPT 1 kini pakai alur WABA (Tools Blast Resmi) — pelanggan diarahkan tekan
+// CATATAN: ke-3 attempt kini pakai alur WABA (Tools Blast Resmi) — pelanggan diarahkan tekan
 // TOMBOL ke halaman konfirmasi web ({{link}}/wa.me DIHAPUS demi compliance Meta), lalu ketik
-// {{kode_referensi}} di sana (lihat konfirmasi.go). Template dipakai juga sebagai penanda
-// pesan di Inbox saat generate. ATTEMPT 2 & 3 MASIH format lama ({{link}} wa.me ke INTI) —
-// {{link}} di-render per (phone,invoice) via applyLink; belum diberi template WABA baru.
+// Nomor Invoice / {{kode_referensi}} di sana (lihat konfirmasi.go). Template dipakai juga sebagai
+// penanda pesan di Inbox saat generate/export Attempt. applyLink tetap dipanggil (mengisi
+// {{kode_referensi}}); {{link}} tak ada lagi di template ini.
 func loadAttemptTemplates() {
 	attemptTemplates[0] = pickTemplate("TEMPLATE_ATTEMPT_1", `Halo, Majoopreneurs!
 
@@ -234,35 +234,28 @@ Mohon untuk tidak membalas pesan ini ya. Terima kasih! 🙏`)
 
 	attemptTemplates[1] = pickTemplate("TEMPLATE_ATTEMPT_2", `Halo, Majoopreneurs!
 
-Mohon maaf, ingin melakukan konfirmasi kembali
-Untuk menjaga keakuratan dan keamanan data, kami perlu melakukan validasi untuk Invoice berikut:
+Kami belum menerima konfirmasi untuk invoice Anda berikut:
 
 Nama Outlet: {{nama_outlet}}
 No. Invoice: {{nomer_invoice}}
+Nomor Referensi: {{kode_referensi}}
 
-Apabila Kakak bersedia mengikuti proses validasi, silakan klik link di bawah ini atau chat ke nomer 085119016132 dengan memasukkan Kode Referensi {{kode_referensi}} untuk terhubung dengan Tim Validator kami (jam operasional 09.00–16.00 WIB):
-{{link}}
+Agar proses validasi Anda tidak tertunda, mohon tekan tombol di bawah ini untuk terhubung dengan Tim Layanan Majoo (jam operasional 09.00–16.00 WIB).
 
-NOTES : Mohon untuk tidak membalas pesan ini, klik link diatas untuk mendapatkan antrian validasi anda.
-
+Mohon untuk tidak membalas pesan ini ya.
 Terima kasih! 🙏`)
 
 	attemptTemplates[2] = pickTemplate("TEMPLATE_ATTEMPT_3", `Halo, Majoopreneurs!
 
-Izin follow up kembali
-Untuk menjaga keakuratan dan keamanan data, kami perlu melakukan validasi untuk Invoice berikut:
+Kami masih menunggu konfirmasi untuk invoice Anda berikut ya:
 
 Nama Outlet: {{nama_outlet}}
 No. Invoice: {{nomer_invoice}}
+Nomor Referensi: {{kode_referensi}}
 
-Apabila Kakak bersedia mengikuti proses validasi, silakan klik link di bawah ini atau chat ke nomer 085119016132 dengan memasukkan Kode Referensi {{kode_referensi}} untuk terhubung dengan Tim Validator kami (jam operasional 09.00–16.00 WIB):
-{{link}}
+Kami informasikan bahwa proses aktivasi dan training akan menunggu hingga validasi invoice ini selesai dikonfirmasi terlebih dahulu. Jika ada kendala atau pertanyaan, silakan hubungi hotline kami di 08111500460.
 
-NOTES : Mohon untuk tidak membalas pesan ini, klik link diatas untuk mendapatkan antrian validasi anda.
-
-Jika Kakak masih belum menghubungi kami, maka penjadwalan kami tutup. Jika terdapat permintaan dan informasi lainnya, silahkan menghubungi Hotline Majoo pada nomer 0811-500-460
-
-Terima kasih! 🙏`)
+Terima kasih banyak! 🙏`)
 }
 
 func pickTemplate(envKey, def string) string {
