@@ -64,6 +64,15 @@ ON CONFLICT(suite, phone, nomer_invoice) DO UPDATE SET
 	}
 }
 
+// unresolvePhone — lepas SEMUA invoice sebuah nomor dari resolved_invoices (undo Done).
+// Dipakai saat Reopen: invoice kembali "belum selesai" → muncul lagi di picker Done +
+// kembali eligible antrian Attempt 2/3.
+func unresolvePhone(suite, phone string) {
+	if _, err := auditDB.Exec(`DELETE FROM resolved_invoices WHERE suite=? AND phone=?`, suite, phone); err != nil {
+		fmt.Println("warn: unresolvePhone:", err)
+	}
+}
+
 // invoiceStatus — 1 invoice yang pernah ter-blast (attempt-1 terkirim) ke sebuah nomor,
 // beserta status resolved-nya. Dipakai picker "pilih invoice mana yang di-Done".
 type invoiceStatus struct {

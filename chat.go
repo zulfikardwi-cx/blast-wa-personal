@@ -768,6 +768,15 @@ func handleSetStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	user, _ := userFromCtx(r.Context())
 
+	// Status lama + resolvePhone (blast_phone kalau thread hasil match manual — invoice
+	// blast-nya di nomor ASLI). Dipakai oleh jalur Done & Reopen-undo.
+	var oldStatus, bp string
+	_ = auditDB.QueryRow(`SELECT status, COALESCE(blast_phone,'') FROM chat_threads WHERE phone=?`, phone).Scan(&oldStatus, &bp)
+	resolvePhone := phone
+	if bp != "" {
+		resolvePhone = bp
+	}
+
 	// Done bisa PARSIAL. Saat thread di-Done, agent boleh memilih invoice mana yang selesai
 	// (form field "invoices", boleh berulang / dipisah koma). Hanya invoice terpilih yang
 	// di-tandai resolved; kalau masih ada invoice tersisa di nomor itu, thread TIDAK jadi
@@ -776,15 +785,6 @@ func handleSetStatus(w http.ResponseWriter, r *http.Request) {
 	effectiveStatus := status
 	partialDone := false
 	if status == "done" {
-		// Thread hasil match manual (inbound_non_blast) menyimpan blast_phone = nomor ASLI yang
-		// di-blast. Resolve pakai itu supaya invoice blast-nya benar-benar keluar dari retry/Belum
-		// Respons (nomor chat manual biasanya tak punya blast_recipients sendiri).
-		resolvePhone := phone
-		var bp string
-		_ = auditDB.QueryRow(`SELECT COALESCE(blast_phone,'') FROM chat_threads WHERE phone=?`, phone).Scan(&bp)
-		if bp != "" {
-			resolvePhone = bp
-		}
 		selected := parseInvoicesField(r)
 		if len(selected) > 0 {
 			markInvoicesResolved("majoo", "blast_recipients", "blast_logs", resolvePhone, selected, user.Email, user.Name, time.Now())
@@ -798,6 +798,12 @@ func handleSetStatus(w http.ResponseWriter, r *http.Request) {
 			// Semua invoice nomor ini selesai → token validasi used, thread benar-benar Done.
 			markTokenUsed(resolvePhone, "")
 		}
+	} else if oldStatus == "done" {
+		// Reopen (atau pindah status apa pun) DARI Done = UNDO Done: lepas SEMUA invoice nomor
+		// ini dari resolved_invoices supaya (a) muncul lagi di picker Done, (b) kembali masuk
+		// antrian Attempt 2/3. Thread jadi 'done' hanya kalau seluruh invoice sudah resolved,
+		// jadi reopen-dari-done pasti berarti seluruhnya perlu dibuka lagi.
+		unresolvePhone("majoo", resolvePhone)
 	}
 
 	// Auto-assign PIC ke user yang klik:

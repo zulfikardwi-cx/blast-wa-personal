@@ -86,4 +86,15 @@ func TestPartialResolve_PerInvoice(t *testing.T) {
 	if phoneHasUnresolvedInvoice("majoo", "blast_recipients", "blast_logs", phone) {
 		t.Error("setelah semua invoice di-Done, harusnya tidak ada unresolved")
 	}
+
+	// Reopen (undo Done) → semua invoice kembali unresolved.
+	unresolvePhone("majoo", phone)
+	if !phoneHasUnresolvedInvoice("majoo", "blast_recipients", "blast_logs", phone) {
+		t.Error("setelah reopen/unresolve, ketiga invoice harusnya kembali unresolved")
+	}
+	for _, x := range phoneInvoiceStatuses("majoo", "blast_recipients", "blast_logs", phone) {
+		if x.Resolved {
+			t.Errorf("invoice %s masih resolved setelah unresolvePhone", x.Invoice)
+		}
+	}
 }
