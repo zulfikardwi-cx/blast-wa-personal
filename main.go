@@ -75,6 +75,9 @@ func main() {
 		log.Fatalf("tokens: %v", err)
 	}
 	closeStaleRunningBlasts()
+	// Stempel attempt per-recipient (urutan kronologis kirim) — betulkan data lama yang
+	// mislabel attempt supaya kolom Attempt di report Belum Respons & antrian akurat.
+	backfillRecipientAttempts()
 	// Self-heal: recipient 'sent' yang di-insert di luar runBlast (import/SQL manual) tak punya
 	// thread → invisible di Inbox & di-drop dari antrian No Response. Buatkan threadnya di sini.
 	// Jalan SETELAH initResolvedInvoices supaya klasifikasi after_blast/done akurat.

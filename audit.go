@@ -60,7 +60,39 @@ CREATE INDEX IF NOT EXISTS idx_recipients_phone ON blast_recipients(phone);
 	if _, e := db.Exec(`ALTER TABLE blast_logs ADD COLUMN attempt INTEGER NOT NULL DEFAULT 1`); e != nil && !strings.Contains(e.Error(), "duplicate column") {
 		return e
 	}
+	// Migrasi: kolom attempt PER-RECIPIENT (override attempt dari blast_logs). Diisi oleh
+	// backfillRecipientAttempts berdasarkan URUTAN KRONOLOGIS kirim per (phone,invoice) —
+	// menangani data lama yang mislabel (mis. satu invoice ter-blast 3x tapi semuanya
+	// tercatat Attempt 1). Query report/antrian pakai COALESCE(r.attempt, b.attempt).
+	if _, e := db.Exec(`ALTER TABLE blast_recipients ADD COLUMN attempt INTEGER`); e != nil && !strings.Contains(e.Error(), "duplicate column") {
+		return e
+	}
 	return nil
+}
+
+// backfillRecipientAttempts — set blast_recipients.attempt = urutan kronologis kirim ke-N per
+// (phone, invoice), di-cap 3. Ini attempt SEBENARNYA tiap kontak: kirim pertama=1, kedua=2,
+// dst — apa pun label attempt di blast_logs-nya. Menangani data lama yang mislabel (mis. re-blast
+// via Generate lama yang selalu tercatat Attempt 1). Idempoten & self-healing: aman dijalankan
+// tiap startup; baris baru (attempt NULL) tetap benar via COALESCE(r.attempt, b.attempt) sampai
+// backfill berikutnya menstempelnya. majoo (blast_recipients) — Zopoz punya tabel sendiri.
+func backfillRecipientAttempts() {
+	_, err := auditDB.Exec(`
+WITH ranked AS (
+  SELECT r.id,
+         MIN(3, ROW_NUMBER() OVER (
+           PARTITION BY r.phone, COALESCE(r.nomer_invoice,'')
+           ORDER BY COALESCE(NULLIF(r.sent_at,''), r.created_at) ASC, r.id ASC)) AS att
+  FROM blast_recipients r
+  WHERE COALESCE(r.nomer_invoice,'') != ''
+)
+UPDATE blast_recipients
+SET attempt = (SELECT att FROM ranked WHERE ranked.id = blast_recipients.id)
+WHERE id IN (SELECT id FROM ranked)
+  AND attempt IS NOT (SELECT att FROM ranked WHERE ranked.id = blast_recipients.id)`)
+	if err != nil {
+		fmt.Println("warn: backfillRecipientAttempts:", err)
+	}
 }
 
 func recordBlastStart(j *BlastJob) (int64, error) {

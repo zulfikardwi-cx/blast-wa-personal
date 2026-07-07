@@ -101,6 +101,45 @@ func TestGenerateLinks_IdempotentTokenPerPhoneInvoice(t *testing.T) {
 	}
 }
 
+func TestGenerateLinks_AutoAdvanceAttempt(t *testing.T) {
+	setupTokenDB(t)
+	phone, inv := "6281383154078", "INV/NEW/202606/01818"
+	// Seed: invoice sudah Attempt 1 terkirim di hari lampau + thread after_blast.
+	res, _ := auditDB.Exec(`INSERT INTO blast_logs (started_at,template,attempt,total,sent) VALUES ('2026-07-01T00:00:00+07:00','tpl',1,1,1)`)
+	logID, _ := res.LastInsertId()
+	auditDB.Exec(`INSERT INTO blast_recipients (blast_log_id,phone,nama_outlet,nomer_invoice,status,sent_at) VALUES (?,?,?,?, 'sent','2026-07-01T09:00:00+07:00')`, logID, phone, "Rm Dapur Mirasa", inv)
+	auditDB.Exec(`INSERT INTO chat_threads (phone,nama_outlet,nomer_invoice,status,current_attempt) VALUES (?,?,?, 'after_blast',1)`, phone, "Rm Dapur Mirasa", inv)
+
+	gen := func() {
+		body, ctype := multipartCSV(t, "phone,nama_outlet,nomer_invoice\n081383154078,Rm Dapur Mirasa,INV/NEW/202606/01818\n")
+		req := httptest.NewRequest("POST", "/api/generate-links", body)
+		req.Header.Set("Content-Type", ctype)
+		rec := httptest.NewRecorder()
+		handleGenerateLinks(rec, req)
+		if rec.Code != 200 {
+			t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+		}
+	}
+
+	// Generate → harus mencatat Attempt 2 (bukan lagi selalu Attempt 1).
+	gen()
+	var maxAtt int
+	auditDB.QueryRow(`SELECT COALESCE(MAX(b.attempt),0) FROM blast_recipients r JOIN blast_logs b ON r.blast_log_id=b.id
+		WHERE r.phone=? AND r.nomer_invoice=? AND r.status='sent'`, phone, inv).Scan(&maxAtt)
+	if maxAtt != 2 {
+		t.Fatalf("setelah generate, max attempt = %d, want 2", maxAtt)
+	}
+
+	// Re-generate HARI YANG SAMA → guard 1 attempt/hari: tidak dobel.
+	gen()
+	var att2Count int
+	auditDB.QueryRow(`SELECT COUNT(*) FROM blast_recipients r JOIN blast_logs b ON r.blast_log_id=b.id
+		WHERE r.phone=? AND r.nomer_invoice=? AND b.attempt=2`, phone, inv).Scan(&att2Count)
+	if att2Count != 1 {
+		t.Errorf("attempt 2 tercatat %d kali, want 1 (guard 1 attempt/hari)", att2Count)
+	}
+}
+
 func TestGenerateLinks_MissingRequiredHeader(t *testing.T) {
 	setupTokenDB(t)
 	body, ctype := multipartCSV(t, "phone,outlet_salah,invoice_salah\n0813,X,INV1\n")

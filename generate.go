@@ -23,6 +23,19 @@ import (
 	"time"
 )
 
+// invoiceAttemptState — attempt tertinggi yang SUDAH terkirim untuk (phone, invoice) + waktu
+// kirim terakhirnya. Dipakai handleGenerateLinks untuk menentukan attempt berikutnya (auto-naik).
+func invoiceAttemptState(phone, invoice string) (int, string) {
+	var maxAtt int
+	var lastSent string
+	_ = auditDB.QueryRow(`
+SELECT COALESCE(MAX(CASE WHEN r.status='sent' THEN COALESCE(r.attempt,b.attempt) ELSE 0 END),0),
+       COALESCE(MAX(CASE WHEN r.status='sent' THEN COALESCE(r.sent_at, r.created_at) END),'')
+FROM blast_recipients r JOIN blast_logs b ON r.blast_log_id=b.id
+WHERE r.phone=? AND COALESCE(r.nomer_invoice,'')=COALESCE(?,'')`, phone, invoice).Scan(&maxAtt, &lastSent)
+	return maxAtt, lastSent
+}
+
 // handleGenerateLinks — POST /api/generate-links. Multipart form field "csv".
 // Return: text/csv attachment (kolom asli + kode + link).
 func handleGenerateLinks(w http.ResponseWriter, r *http.Request) {
@@ -82,18 +95,31 @@ func handleGenerateLinks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate = masuk flow blast (dikirim tools eksternal) → catat sebagai Riwayat
-	// Blast Attempt 1. recordedCount = yang BENAR-BENAR baru dicatat (anti-dobel utk
-	// invoice yang sudah pernah attempt 1, mis. data metode lama / re-upload).
+	// Generate = masuk flow blast (dikirim tools eksternal) → catat ke Riwayat Blast pada
+	// ATTEMPT YANG BENAR per invoice: attempt = (attempt terkirim tertinggi sebelumnya) + 1,
+	// mentok di 3. Invoice baru → Attempt 1; yang sudah pernah Attempt 1 → Attempt 2; dst.
+	// Guard "1 attempt/hari per invoice" mencegah dobel saat CSV yang sama di-generate ulang
+	// di hari yang sama. Satu upload bisa berisi campuran attempt → entri Riwayat Blast dibuat
+	// per-attempt (lazy), supaya kolom Attempt di Riwayat & report Belum Respons akurat.
 	user, _ := userFromCtx(r.Context())
 	now := time.Now()
-	logID, err := recordRetryBatchStart(user.Email, user.Name, GetAttemptTemplate(1), 1, 0, now)
-	if err != nil {
-		httpErr(w, 500, "batch start: %v", err)
-		return
+	startToday := startOfTodayWIB()
+
+	logIDs := map[int]int64{} // attempt → blast_log id (lazy)
+	counts := map[int]int{}   // attempt → jumlah recipient tercatat
+	getLog := func(att int) int64 {
+		if id, ok := logIDs[att]; ok {
+			return id
+		}
+		id, err := recordRetryBatchStart(user.Email, user.Name, GetAttemptTemplate(att), att, 0, now)
+		if err != nil {
+			return 0
+		}
+		logIDs[att] = id
+		return id
 	}
 
-	rows, generated, recorded := 0, 0, 0
+	rows, generated := 0, 0
 	for {
 		rec, err := rd.Read()
 		if err != nil {
@@ -117,12 +143,22 @@ func handleGenerateLinks(w http.ResponseWriter, r *http.Request) {
 		if phone != "" {
 			kode = getOrCreateToken(phone, invoice, outlet)
 			generated++
-			// Catat Attempt 1 ke Riwayat Blast + buat thread after_blast (kalau baru).
-			body := applyLink(renderTemplateWithVars(GetAttemptTemplate(1), outlet, invoice), phone, invoice, outlet)
-			if recordAttempt1Sent(logID, phone, outlet, invoice, body, now) {
-				recorded++
-				// Tampilkan pesan Attempt 1 di Inbox (penanda sudah di-blast), walau kirim via tools eksternal.
+			maxAtt, lastSent := invoiceAttemptState(phone, invoice)
+			// Catat attempt berikutnya, KECUALI sudah mentok Attempt 3 atau sudah dikirimi
+			// attempt hari ini (hindari dobel saat re-generate CSV yang sama).
+			if maxAtt < 3 && !attemptedToday(lastSent, startToday) {
+				att := maxAtt + 1
+				logID := getLog(att)
+				body := applyLink(renderTemplateWithVars(GetAttemptTemplate(att), outlet, invoice), phone, invoice, outlet)
+				_ = recordRetryRecipient(logID, phone, outlet, invoice, "sent", "", body, now)
+				if att == 1 {
+					ensureThreadAfterBlast(phone, outlet, invoice, logID, body, now)
+				} else {
+					_ = bumpThreadAfterRetry("chat_threads", phone, body, att, now)
+				}
+				// Tampilkan pesan attempt ini di Inbox (penanda sudah di-blast, walau kirim via tools eksternal).
 				_ = recordChatMessage(phone, "out", body, "", "", now, logID, user.Email, user.Name)
+				counts[att]++
 			}
 		}
 		// Baris FIXED: phone, full_name(outlet), nick_name(invoice), gender(kode), package(kosong).
@@ -137,12 +173,13 @@ func handleGenerateLinks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Tutup entri Riwayat Blast Attempt 1: kalau ada yang baru dicatat → update
-	// total/sent; kalau semua sudah pernah attempt 1 (0 baru) → hapus entri kosong.
-	if recorded > 0 {
-		_ = recordRetryBatchEnd(logID, recorded, 0, now)
-	} else {
-		deleteEmptyBlastLog(logID)
+	// Tutup tiap entri Riwayat Blast per-attempt; hapus yang kosong (0 recipient tercatat).
+	for att, id := range logIDs {
+		if counts[att] > 0 {
+			_ = recordRetryBatchEnd(id, counts[att], 0, now)
+		} else {
+			deleteEmptyBlastLog(id)
+		}
 	}
 
 	fname := fmt.Sprintf("kode-link-%s.csv", time.Now().Format("20060102-150405"))

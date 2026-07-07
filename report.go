@@ -60,11 +60,11 @@ func queryUnresponsive() ([]UnresponsiveRow, error) {
 SELECT r.phone,
        COALESCE(MAX(r.nama_outlet), ''),
        r.nomer_invoice,
-       MAX(CASE WHEN b.attempt=1 AND r.status='sent'   THEN 1 ELSE 0 END) AS a1s,
-       MAX(CASE WHEN b.attempt=1 AND r.status='failed' THEN 1 ELSE 0 END) AS a1f,
-       MAX(CASE WHEN b.attempt=2 AND r.status='sent'   THEN 1 ELSE 0 END) AS a2s,
-       MAX(CASE WHEN b.attempt=3 AND r.status='sent'   THEN 1 ELSE 0 END) AS a3s,
-       COALESCE(MAX(CASE WHEN b.attempt=1 AND r.status='failed' THEN r.error END), '') AS a1err,
+       MAX(CASE WHEN COALESCE(r.attempt,b.attempt)=1 AND r.status='sent'   THEN 1 ELSE 0 END) AS a1s,
+       MAX(CASE WHEN COALESCE(r.attempt,b.attempt)=1 AND r.status='failed' THEN 1 ELSE 0 END) AS a1f,
+       MAX(CASE WHEN COALESCE(r.attempt,b.attempt)=2 AND r.status='sent'   THEN 1 ELSE 0 END) AS a2s,
+       MAX(CASE WHEN COALESCE(r.attempt,b.attempt)=3 AND r.status='sent'   THEN 1 ELSE 0 END) AS a3s,
+       COALESCE(MAX(CASE WHEN COALESCE(r.attempt,b.attempt)=1 AND r.status='failed' THEN r.error END), '') AS a1err,
        t.status,
        COALESCE(t.reject_reason, '')
 FROM blast_recipients r

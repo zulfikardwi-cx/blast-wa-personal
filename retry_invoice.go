@@ -24,7 +24,7 @@ type invoiceRetry struct {
 func collectInvoiceRetries(suite, threadsTbl, recvTbl, logsTbl string, targetAttempt int, startOfToday time.Time) []invoiceRetry {
 	q := `
 SELECT r.phone, COALESCE(r.nomer_invoice,''), COALESCE(MAX(r.nama_outlet),''),
-       MAX(CASE WHEN r.status='sent' THEN b.attempt ELSE 0 END) AS max_att,
+       MAX(CASE WHEN r.status='sent' THEN COALESCE(r.attempt,b.attempt) ELSE 0 END) AS max_att,
        COALESCE(MAX(CASE WHEN r.status='sent' THEN COALESCE(r.sent_at, r.created_at) END), '') AS last_sent
 FROM ` + recvTbl + ` r
 JOIN ` + logsTbl + ` b ON r.blast_log_id = b.id
@@ -81,7 +81,7 @@ func invoiceStillNeedsRetry(suite, threadsTbl, recvTbl, logsTbl, phone, invoice 
 	var maxAtt int
 	var lastSent string
 	err := auditDB.QueryRow(`
-SELECT COALESCE(MAX(CASE WHEN r.status='sent' THEN b.attempt ELSE 0 END),0),
+SELECT COALESCE(MAX(CASE WHEN r.status='sent' THEN COALESCE(r.attempt,b.attempt) ELSE 0 END),0),
        COALESCE(MAX(CASE WHEN r.status='sent' THEN COALESCE(r.sent_at, r.created_at) END),'')
 FROM `+recvTbl+` r JOIN `+logsTbl+` b ON r.blast_log_id=b.id
 WHERE r.phone=? AND r.nomer_invoice=?`, phone, invoice).Scan(&maxAtt, &lastSent)
@@ -116,7 +116,7 @@ func phoneHasPendingInvoice(recvTbl, logsTbl, phone string) bool {
 	var c int
 	_ = auditDB.QueryRow(`
 SELECT COUNT(*) FROM (
-  SELECT r.nomer_invoice, MAX(CASE WHEN r.status='sent' THEN b.attempt ELSE 0 END) m
+  SELECT r.nomer_invoice, MAX(CASE WHEN r.status='sent' THEN COALESCE(r.attempt,b.attempt) ELSE 0 END) m
   FROM `+recvTbl+` r JOIN `+logsTbl+` b ON r.blast_log_id=b.id
   WHERE r.phone=? AND COALESCE(r.nomer_invoice,'')!=''
   GROUP BY r.nomer_invoice HAVING m BETWEEN 1 AND 2

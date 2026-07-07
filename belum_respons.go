@@ -139,23 +139,3 @@ ON CONFLICT(phone) DO UPDATE SET
 	updated_at = excluded.updated_at`,
 		phone, outlet, invoice, nullableID(logID), tsStr, prev, tsStr, tsStr)
 }
-
-// recordAttempt1Sent — catat 1 invoice sebagai Attempt 1 'sent' ke Riwayat Blast +
-// buat thread. Anti-dobel: skip kalau invoice ini sudah pernah tercatat attempt 1
-// 'sent' (mis. data metode lama / re-upload). Return true kalau baru direkam.
-func recordAttempt1Sent(logID int64, phone, outlet, invoice, body string, now time.Time) bool {
-	// SELALU reaktivasi thread ke after_blast (biar blast muncul di Inbox After Blast),
-	// walau invoice-nya sudah pernah tercatat attempt 1 (mis. re-blast / data lama).
-	ensureThreadAfterBlast(phone, outlet, invoice, logID, body, now)
-	// Anti-dobel: catat blast_recipients attempt-1 HANYA kalau belum ada (cegah entri Riwayat ganda).
-	var c int
-	_ = auditDB.QueryRow(`
-SELECT COUNT(*) FROM blast_recipients r JOIN blast_logs b ON r.blast_log_id=b.id
-WHERE r.phone=? AND COALESCE(r.nomer_invoice,'')=COALESCE(?,'') AND r.status='sent' AND b.attempt=1`,
-		phone, invoice).Scan(&c)
-	if c > 0 {
-		return false
-	}
-	_ = recordRetryRecipient(logID, phone, outlet, invoice, "sent", "", body, now)
-	return true
-}
