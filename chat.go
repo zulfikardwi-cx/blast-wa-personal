@@ -663,6 +663,7 @@ type MessageRow struct {
 	Timestamp   string `json:"timestamp"`
 	SenderEmail string `json:"sender_email"`
 	SenderName  string `json:"sender_name"`
+	Attempt     int    `json:"attempt"` // >0 = pesan blast Attempt N (dari blast_recipients); 0 = bukan blast
 }
 
 func handleMessages(w http.ResponseWriter, r *http.Request) {
@@ -671,7 +672,14 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, 400, "phone required")
 		return
 	}
-	rows, err := auditDB.Query(`SELECT id, direction, COALESCE(body,''), is_media, COALESCE(media_type,''), COALESCE(media_path,''), timestamp, COALESCE(sender_email,''), COALESCE(sender_name,'') FROM chat_messages WHERE phone = ? ORDER BY id ASC LIMIT 500`, phone)
+	// attempt per-pesan: pesan blast (punya blast_log_id) → attempt yang BENAR dari
+	// blast_recipients (COALESCE(r.attempt,b.attempt)); pesan lain (balasan/agent) → 0.
+	rows, err := auditDB.Query(`
+SELECT m.id, m.direction, COALESCE(m.body,''), m.is_media, COALESCE(m.media_type,''), COALESCE(m.media_path,''),
+       m.timestamp, COALESCE(m.sender_email,''), COALESCE(m.sender_name,''),
+       COALESCE((SELECT COALESCE(r.attempt, b.attempt) FROM blast_recipients r JOIN blast_logs b ON r.blast_log_id=b.id
+                 WHERE r.blast_log_id=m.blast_log_id AND r.phone=m.phone AND r.status='sent' LIMIT 1), 0) AS attempt
+FROM chat_messages m WHERE m.phone = ? ORDER BY m.id ASC LIMIT 500`, phone)
 	if err != nil {
 		httpErr(w, 500, "query: %v", err)
 		return
@@ -682,7 +690,7 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 		var m MessageRow
 		var isMedia int
 		var mediaPath string
-		if err := rows.Scan(&m.ID, &m.Direction, &m.Body, &isMedia, &m.MediaType, &mediaPath, &m.Timestamp, &m.SenderEmail, &m.SenderName); err != nil {
+		if err := rows.Scan(&m.ID, &m.Direction, &m.Body, &isMedia, &m.MediaType, &mediaPath, &m.Timestamp, &m.SenderEmail, &m.SenderName, &m.Attempt); err != nil {
 			continue
 		}
 		m.IsMedia = isMedia == 1
@@ -701,6 +709,7 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 	// Token dibuat utk nomor yang DI-BLAST; thread hasil match manual menyimpannya di blast_phone.
 	// Coba blast_phone dulu (thread matched), lalu phone thread (thread blast biasa).
 	kodeRef := ""
+	threadAttempt := 0
 	if nomerInvoice != "" {
 		for _, p := range []string{blastPhone, phone} {
 			if p == "" {
@@ -710,6 +719,15 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 		}
+		// Attempt tertinggi yang sudah terkirim untuk invoice thread ini (pakai attempt per-recipient
+		// yang sudah dikoreksi). Ditampilkan di header Inbox.
+		resolveP := phone
+		if blastPhone != "" {
+			resolveP = blastPhone
+		}
+		_ = auditDB.QueryRow(`SELECT COALESCE(MAX(CASE WHEN r.status='sent' THEN COALESCE(r.attempt,b.attempt) END),0)
+			FROM blast_recipients r JOIN blast_logs b ON r.blast_log_id=b.id
+			WHERE r.phone=? AND r.nomer_invoice=?`, resolveP, nomerInvoice).Scan(&threadAttempt)
 	}
 
 	writeJSON(w, map[string]any{
@@ -722,6 +740,7 @@ func handleMessages(w http.ResponseWriter, r *http.Request) {
 		"nomer_invoice":    nomerInvoice,
 		"blast_phone":      blastPhone,
 		"kode":             kodeRef,
+		"attempt":          threadAttempt,
 		"messages":         out,
 		"closing_template": renderClosingTemplate(nama),
 	})

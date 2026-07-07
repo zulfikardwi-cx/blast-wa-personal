@@ -156,6 +156,7 @@
   .day-sep{text-align:center;color:var(--muted);font-size:11px;margin:16px 0 8px;text-transform:uppercase;letter-spacing:1px}
   .msg{max-width:55%;padding:8px 12px;border-radius:10px;word-wrap:break-word;line-height:1.4;font-size:13px;white-space:pre-wrap}
   .msg .meta{font-size:10px;color:var(--muted);margin-top:4px;display:flex;gap:6px}
+  .att-chip{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.3px;padding:1px 8px;border-radius:99px;background:rgba(45,189,182,.22);color:var(--teal);margin-bottom:6px}
   .msg.in{background:var(--bubble-in);align-self:flex-start;border-bottom-left-radius:2px}
   .msg.out{background:var(--bubble-out);align-self:flex-end;border-bottom-right-radius:2px}
   .msg.system{background:transparent;align-self:center;color:var(--muted);font-size:11px;font-style:italic;max-width:80%;text-align:center;padding:4px 12px;border:1px dashed var(--line);border-radius:6px;margin:8px 0}
@@ -602,9 +603,13 @@ async function loadMessages(scrollBottom) {
         : (ongoing ? 'Sedang divalidasi (On Going). Tulis balasan...' : 'Tulis balasan...');
     }
 
-    // Indikator terkait invoice (thread non-blast yang sudah dicocokkan menyimpan blast_phone).
-    if (r.blast_phone && r.nomer_invoice) {
-      $('#hInvoice').textContent = '🔗 Terkait invoice: ' + r.nomer_invoice + ' (via blast ' + r.blast_phone + ')';
+    // Indikator invoice + attempt terakhir. Tampil untuk SEMUA thread yang punya invoice
+    // (bukan cuma thread non-blast yang dicocokkan). Attempt = kiriman blast tertinggi.
+    if (r.nomer_invoice) {
+      let t = '🔗 Invoice: ' + r.nomer_invoice;
+      if (r.attempt) t += ' · Attempt ' + r.attempt;
+      if (r.blast_phone) t += ' (via blast ' + r.blast_phone + ')';
+      $('#hInvoice').textContent = t;
       $('#hInvoice').style.display = '';
     } else {
       $('#hInvoice').style.display = 'none';
@@ -653,7 +658,8 @@ async function loadMessages(scrollBottom) {
       div.className = 'msg ' + m.direction;
       const timeStr = d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
       const sender = m.direction === 'out' && m.sender_name ? esc(m.sender_name) : (m.direction === 'in' ? 'User' : 'Blast');
-      div.innerHTML = renderMsgBody(m) + `<div class="meta">${sender} · ${timeStr}</div>`;
+      const attTag = m.attempt ? `<span class="att-chip">Attempt ${m.attempt}</span>` : '';
+      div.innerHTML = attTag + renderMsgBody(m) + `<div class="meta">${sender} · ${timeStr}</div>`;
       list.appendChild(div);
     });
     if (scrollBottom) list.scrollTop = list.scrollHeight;
