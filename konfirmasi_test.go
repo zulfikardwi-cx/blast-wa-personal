@@ -79,6 +79,32 @@ func TestKonfirmasi_ByInvoiceNumber(t *testing.T) {
 	}
 }
 
+func TestKonfirmasiCoba_RedirectsToCobaNumber(t *testing.T) {
+	setupBlastHistoryDB(t) // set INTI_WA_NUMBER = 6285119012345
+	seedTokenRow(t, "HWYTSJJU", "6285702526099", "INV/NEW/202606/01226", "Drip n Dine")
+	if _, err := auditDB.Exec(`INSERT INTO chat_threads (phone,status) VALUES ('6285702526099','after_blast')`); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest("POST", "/api/konfirmasi-coba", strings.NewReader(`{"kode":"HWYTSJJU"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = "203.0.113.10:5000"
+	rec := httptest.NewRecorder()
+	handleKonfirmasiCoba(rec, req)
+
+	body := rec.Body.String()
+	if !strings.Contains(body, `"ok":true`) {
+		t.Fatalf("konfirmasi-coba gagal: %s", body)
+	}
+	// wa_link HARUS ke nomor percobaan (62811500460), BUKAN nomor INTI.
+	if !strings.Contains(body, "wa.me/62811500460?") {
+		t.Errorf("wa_link tidak menuju 62811500460: %s", body)
+	}
+	if strings.Contains(body, "wa.me/6285119012345") {
+		t.Errorf("wa_link tidak boleh ke nomor INTI: %s", body)
+	}
+}
+
 func TestKonfirmasi_InvalidCode(t *testing.T) {
 	setupBlastHistoryDB(t)
 	rec := postKonfirmasi("ZZZZ9999")

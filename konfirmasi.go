@@ -73,9 +73,30 @@ func clientIP(r *http.Request) string {
 	return host
 }
 
-// handleKonfirmasi — POST /api/konfirmasi (publik). Body JSON {"kode":"XXXX"} atau
-// form field "kode". Return {ok, nama_outlet, nomer_invoice} kalau cocok.
+// cobaNumber — nomor tujuan redirect chat untuk HALAMAN PERCOBAAN (konfirmasi-coba.html).
+// Default 0811500460 (→ 62811500460). Override via env KONFIRMASI_COBA_NUMBER.
+func cobaNumber() string {
+	if v := normalizePhone(os.Getenv("KONFIRMASI_COBA_NUMBER")); v != "" {
+		return v
+	}
+	return "62811500460"
+}
+
+// handleKonfirmasi — POST /api/konfirmasi (publik). Redirect chat ke nomor INTI.
 func handleKonfirmasi(w http.ResponseWriter, r *http.Request) {
+	konfirmasiCore(w, r, "")
+}
+
+// handleKonfirmasiCoba — POST /api/konfirmasi-coba (publik). IDENTIK dengan /api/konfirmasi,
+// hanya link WhatsApp-nya redirect ke cobaNumber() (halaman percobaan).
+func handleKonfirmasiCoba(w http.ResponseWriter, r *http.Request) {
+	konfirmasiCore(w, r, cobaNumber())
+}
+
+// konfirmasiCore — inti handler konfirmasi. Body JSON {"kode":"XXXX"} atau form field "kode".
+// Return {ok, nama_outlet, nomer_invoice, wa_link} kalau cocok. linkTarget = nomor tujuan
+// redirect chat ("" → nomor INTI).
+func konfirmasiCore(w http.ResponseWriter, r *http.Request, linkTarget string) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "POST only", 405)
 		return
@@ -134,7 +155,7 @@ func handleKonfirmasi(w http.ResponseWriter, r *http.Request) {
 	// Link wa.me ke INTI dengan pesan prefilled (Kode Referensi) — customer diarahkan chat
 	// ke Inti setelah konfirmasi supaya Inti dapat inbound ASLI (window terbuka → validator
 	// bisa balas normal, tak kena 463). Token asli dipakai (bukan input mentah).
-	waLink := buildTriggerLink(phone, invoice, outlet, token)
+	waLink := buildTriggerLinkTo(linkTarget, phone, invoice, outlet, token)
 
 	writeJSON(w, map[string]any{"ok": true, "nama_outlet": outlet, "nomer_invoice": invoice, "wa_link": waLink})
 }

@@ -75,6 +75,12 @@ func main() {
 		log.Fatalf("tokens: %v", err)
 	}
 	closeStaleRunningBlasts()
+	// Self-heal: recipient 'sent' yang di-insert di luar runBlast (import/SQL manual) tak punya
+	// thread → invisible di Inbox & di-drop dari antrian No Response. Buatkan threadnya di sini.
+	// Jalan SETELAH initResolvedInvoices supaya klasifikasi after_blast/done akurat.
+	if err := backfillMissingThreads(); err != nil {
+		fmt.Println("warn: backfillMissingThreads:", err)
+	}
 	startRetryScheduler()
 	startZopozRetryScheduler()
 
@@ -158,6 +164,7 @@ func main() {
 	mux.HandleFunc("/api/belum-respons/export", corsMiddleware(requireAuth(handleBelumResponsExport)))
 	// PUBLIK (tanpa login): customer konfirmasi kode referensi dari halaman web.
 	mux.HandleFunc("/api/konfirmasi", corsMiddleware(handleKonfirmasi))
+	mux.HandleFunc("/api/konfirmasi-coba", corsMiddleware(handleKonfirmasiCoba))
 	mux.HandleFunc("/api/progress", corsMiddleware(requireAuth(handleProgress)))
 	mux.HandleFunc("/api/history", corsMiddleware(requireAuth(handleHistory)))
 	mux.HandleFunc("/api/sheet-status", corsMiddleware(requireAuth(handleSheetStatus)))
@@ -183,6 +190,7 @@ func main() {
 	mux.HandleFunc("/api/inbox/messages", corsMiddleware(requireAuth(handleMessages)))
 	mux.HandleFunc("/api/inbox/read", corsMiddleware(requireAuth(handleMarkRead)))
 	mux.HandleFunc("/api/inbox/status", corsMiddleware(requireAuth(handleSetStatus)))
+	mux.HandleFunc("/api/inbox/invoices", corsMiddleware(requireAuth(handleThreadInvoices)))
 	mux.HandleFunc("/api/inbox/match-token", corsMiddleware(requireAuth(handleMatchToken)))
 	mux.HandleFunc("/api/inbox/reply", corsMiddleware(requireAuth(handleReply)))
 	mux.HandleFunc("/api/inbox/resolve", corsMiddleware(requireAuth(handleResolve)))

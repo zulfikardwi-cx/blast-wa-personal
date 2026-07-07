@@ -207,6 +207,57 @@ WHERE NOT EXISTS (SELECT 1 FROM chat_threads t WHERE t.phone = r.phone)`)
 	return nil
 }
 
+// backfillMissingThreads — buat thread untuk recipient blast 'sent' yang BELUM punya thread.
+// Kasus: recipient di-insert DI LUAR runBlast (yang selalu upsertThreadBlast) — mis. batch
+// yang direkam via import/SQL manual dari tools blast eksternal (WABA resmi). Tanpa thread,
+// invoice-nya tak muncul di Inbox DAN di-drop dari antrian No Response (collectInvoiceRetries
+// INNER JOIN chat_threads → nomor tanpa thread lenyap dari Attempt 1/2/3).
+//
+// Aturan Done per-(phone,invoice): nomor yang masih punya ≥1 invoice BELUM di-resolve →
+// thread 'after_blast' (semua invoice belum-resolved-nya kembali mengalir ke Attempt 1/2/3,
+// yang sudah resolved tetap dikecualikan per-invoice via resolved_invoices). Nomor yang SEMUA
+// invoice-nya sudah resolved → thread 'done' (Inbox konsisten, tetap di luar antrian).
+//
+// HARUS jalan SETELAH backfillResolvedInvoices (resolved_invoices terisi) supaya klasifikasi
+// after_blast/done benar. Idempoten: hanya insert kalau phone belum ada di chat_threads
+// (NOT EXISTS), jadi aman tiap startup & tak menimpa thread yang sudah ditangani. Ambil baris
+// 'sent' TERBARU per phone (MAX(id)) untuk data outlet/invoice/pesan.
+func backfillMissingThreads() error {
+	res, err := auditDB.Exec(`
+INSERT INTO chat_threads
+	(phone, nama_outlet, nomer_invoice, last_blast_id, last_message_at, last_message_preview,
+	 last_message_direction, status, unread_count, current_attempt, last_attempt_at,
+	 created_at, updated_at)
+SELECT r.phone, r.nama_outlet, r.nomer_invoice, r.blast_log_id,
+	COALESCE(NULLIF(r.sent_at,''), r.created_at),
+	substr(COALESCE(r.message,''),1,80),
+	'out',
+	CASE WHEN EXISTS (
+		SELECT 1 FROM blast_recipients r2
+		WHERE r2.phone=r.phone AND r2.status='sent' AND COALESCE(r2.nomer_invoice,'')<>''
+		  AND NOT EXISTS (SELECT 1 FROM resolved_invoices rv
+		       WHERE rv.suite='majoo' AND rv.phone=r2.phone AND rv.nomer_invoice=r2.nomer_invoice)
+	) THEN 'after_blast' ELSE 'done' END,
+	0,
+	COALESCE((SELECT MAX(b.attempt) FROM blast_recipients r3 JOIN blast_logs b ON r3.blast_log_id=b.id
+	          WHERE r3.phone=r.phone AND r3.status='sent'), 1),
+	COALESCE(NULLIF(r.sent_at,''), r.created_at),
+	r.created_at, datetime('now')
+FROM blast_recipients r
+JOIN (SELECT phone, MAX(id) AS maxid FROM blast_recipients
+      WHERE status='sent' AND COALESCE(nomer_invoice,'')<>''
+      GROUP BY phone) m
+	ON r.id = m.maxid
+WHERE NOT EXISTS (SELECT 1 FROM chat_threads t WHERE t.phone = r.phone)`)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		fmt.Printf("backfill: %d nomor sent tanpa thread → thread after_blast/done dibuat\n", n)
+	}
+	return nil
+}
+
 // ---- 3 template attempts (sesuai spec user) ----
 // Override via env: TEMPLATE_ATTEMPT_1 / TEMPLATE_ATTEMPT_2 / TEMPLATE_ATTEMPT_3
 // Pakai \n untuk newline kalau di-set via env.
@@ -717,36 +768,13 @@ func handleSetStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	user, _ := userFromCtx(r.Context())
 
-	// Auto-assign PIC ke user yang klik:
-	//   - in_progress / on_going / scheduled → PIC penangan.
-	//   - done → PIC = orang yang menyelesaikan (resolver). Alur Done di inbox lewat sini
-	//     (sendReply → setStatus 'done'), jadi resolver DICATAT di sini (bukan di-clear).
-	//   - open / invalid / force_close → clear (netral). Re-open otomatis melepas PIC.
-	var assignedEmail, assignedName sql.NullString
-	if status == "in_progress" || status == "on_going" || status == "scheduled" || status == "done" {
-		assignedEmail = sql.NullString{String: user.Email, Valid: true}
-		assignedName = sql.NullString{String: user.Name, Valid: true}
-	} else {
-		assignedEmail = sql.NullString{}
-		assignedName = sql.NullString{}
-	}
-
-	// followup_at hanya untuk 'scheduled' (tanggal kapan perlu follow-up). Status lain → NULL.
-	var followup sql.NullString
-	if status == "scheduled" {
-		if f := strings.TrimSpace(r.FormValue("followup_at")); f != "" {
-			followup = sql.NullString{String: f, Valid: true}
-		}
-	}
-
-	if _, err := auditDB.Exec(`UPDATE chat_threads SET status = ?, assigned_email = ?, assigned_name = ?, followup_at = ?, updated_at = datetime('now') WHERE phone = ?`,
-		status, assignedEmail, assignedName, followup, phone); err != nil {
-		httpErr(w, 500, "update: %v", err)
-		return
-	}
-
-	// Saat thread di-Done: tandai SEMUA invoice nomor ini resolved (permanen) — sumber PIC
-	// report "report resolved" + exclude dari antrian retry walau di-blast ulang nanti.
+	// Done bisa PARSIAL. Saat thread di-Done, agent boleh memilih invoice mana yang selesai
+	// (form field "invoices", boleh berulang / dipisah koma). Hanya invoice terpilih yang
+	// di-tandai resolved; kalau masih ada invoice tersisa di nomor itu, thread TIDAK jadi
+	// 'done' tetapi tetap aktif ('in_progress') supaya sisa invoice lanjut Attempt 2/3. Tanpa
+	// field "invoices" → perilaku lama: resolve SEMUA invoice nomor itu (checklist semua).
+	effectiveStatus := status
+	partialDone := false
 	if status == "done" {
 		// Thread hasil match manual (inbound_non_blast) menyimpan blast_phone = nomor ASLI yang
 		// di-blast. Resolve pakai itu supaya invoice blast-nya benar-benar keluar dari retry/Belum
@@ -757,12 +785,85 @@ func handleSetStatus(w http.ResponseWriter, r *http.Request) {
 		if bp != "" {
 			resolvePhone = bp
 		}
-		markPhoneResolved("majoo", "blast_recipients", "blast_logs", resolvePhone, user.Email, user.Name, time.Now())
-		// Token validasi → used (dok: token used saat Done). Keluar dari antrian blast.
-		markTokenUsed(resolvePhone, "")
+		selected := parseInvoicesField(r)
+		if len(selected) > 0 {
+			markInvoicesResolved("majoo", "blast_recipients", "blast_logs", resolvePhone, selected, user.Email, user.Name, time.Now())
+		} else {
+			markPhoneResolved("majoo", "blast_recipients", "blast_logs", resolvePhone, user.Email, user.Name, time.Now())
+		}
+		if phoneHasUnresolvedInvoice("majoo", "blast_recipients", "blast_logs", resolvePhone) {
+			effectiveStatus = "in_progress" // masih ada sisa → thread tetap aktif utk Attempt 2/3
+			partialDone = true
+		} else {
+			// Semua invoice nomor ini selesai → token validasi used, thread benar-benar Done.
+			markTokenUsed(resolvePhone, "")
+		}
 	}
 
-	writeJSON(w, map[string]any{"ok": true})
+	// Auto-assign PIC ke user yang klik:
+	//   - in_progress / on_going / scheduled → PIC penangan.
+	//   - done → PIC = orang yang menyelesaikan (resolver). Alur Done di inbox lewat sini
+	//     (sendReply → setStatus 'done'), jadi resolver DICATAT di sini (bukan di-clear).
+	//   - open / invalid / force_close → clear (netral). Re-open otomatis melepas PIC.
+	var assignedEmail, assignedName sql.NullString
+	if effectiveStatus == "in_progress" || effectiveStatus == "on_going" || effectiveStatus == "scheduled" || effectiveStatus == "done" {
+		assignedEmail = sql.NullString{String: user.Email, Valid: true}
+		assignedName = sql.NullString{String: user.Name, Valid: true}
+	} else {
+		assignedEmail = sql.NullString{}
+		assignedName = sql.NullString{}
+	}
+
+	// followup_at hanya untuk 'scheduled' (tanggal kapan perlu follow-up). Status lain → NULL.
+	var followup sql.NullString
+	if effectiveStatus == "scheduled" {
+		if f := strings.TrimSpace(r.FormValue("followup_at")); f != "" {
+			followup = sql.NullString{String: f, Valid: true}
+		}
+	}
+
+	if _, err := auditDB.Exec(`UPDATE chat_threads SET status = ?, assigned_email = ?, assigned_name = ?, followup_at = ?, updated_at = datetime('now') WHERE phone = ?`,
+		effectiveStatus, assignedEmail, assignedName, followup, phone); err != nil {
+		httpErr(w, 500, "update: %v", err)
+		return
+	}
+
+	writeJSON(w, map[string]any{"ok": true, "partial_done": partialDone, "status": effectiveStatus})
+}
+
+// parseInvoicesField — daftar invoice dari form field "invoices" (boleh berulang atau satu
+// string dipisah koma). Trim, buang kosong, dedup. r.Form sudah terisi (ParseMultipartForm/
+// ParseForm dipanggil di awal handleStatus).
+func parseInvoicesField(r *http.Request) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, v := range r.Form["invoices"] {
+		for _, p := range strings.Split(v, ",") {
+			if p = strings.TrimSpace(p); p != "" && !seen[p] {
+				seen[p] = true
+				out = append(out, p)
+			}
+		}
+	}
+	return out
+}
+
+// handleThreadInvoices — GET /api/inbox/invoices?phone= . Daftar invoice (attempt-1 'sent')
+// untuk sebuah nomor + flag resolved. Dipakai picker "pilih invoice mana yang di-Done" saat
+// nomor punya >1 invoice.
+func handleThreadInvoices(w http.ResponseWriter, r *http.Request) {
+	phone := r.URL.Query().Get("phone")
+	if phone == "" {
+		httpErr(w, 400, "phone required")
+		return
+	}
+	resolvePhone := phone
+	var bp string
+	_ = auditDB.QueryRow(`SELECT COALESCE(blast_phone,'') FROM chat_threads WHERE phone=?`, phone).Scan(&bp)
+	if bp != "" {
+		resolvePhone = bp
+	}
+	writeJSON(w, map[string]any{"ok": true, "invoices": phoneInvoiceStatuses("majoo", "blast_recipients", "blast_logs", resolvePhone)})
 }
 
 // handleMatchToken — agent mencocokkan chat MANUAL (bucket inbound_non_blast) ke invoice via

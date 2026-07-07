@@ -141,6 +141,13 @@
   .modal-actions button{padding:9px 16px;border-radius:8px;border:0;cursor:pointer;font-weight:600;font-size:13px}
   .modal-actions .save{background:#22d3ee;color:#06222a}
   .modal-actions .cancel{background:transparent;color:var(--text);border:1px solid var(--line)}
+  .inv-list{max-height:280px;overflow-y:auto;display:flex;flex-direction:column;gap:6px}
+  .inv-row{display:flex;align-items:center;gap:10px;padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);font-size:12.5px}
+  .inv-row input[type=checkbox]{width:16px;height:16px;flex:0 0 auto;cursor:pointer}
+  .inv-row .inv-no{font-family:ui-monospace,Menlo,monospace;color:var(--text)}
+  .inv-row .inv-tag{margin-left:auto;font-size:10.5px;padding:2px 7px;border-radius:99px;background:rgba(154,207,135,.16);color:var(--lime)}
+  .inv-row.resolved{opacity:.6}
+  .inv-row label{display:flex;align-items:center;gap:10px;cursor:pointer;width:100%}
   .chat-header button.reopen-btn{border-color:var(--blue);color:var(--blue)}
   .chat-header button.reopen-btn:hover{background:var(--blue);color:#fff}
   .chat-header button:hover:not(.done-btn):not(.reopen-btn){background:var(--panel2)}
@@ -358,6 +365,18 @@
     <div class="modal-actions">
       <button class="cancel" id="schedCancel">Batal</button>
       <button class="save" id="schedSave">Simpan</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="doneModal" style="display:none">
+  <div class="modal" style="width:420px">
+    <h3>✓ Pilih invoice yang selesai divalidasi</h3>
+    <p>Nomor ini punya beberapa invoice. Centang invoice yang <b>sudah selesai</b> — hanya itu yang ditandai Done. Invoice yang tidak dicentang tetap lanjut Attempt 1/2/3.</p>
+    <div id="doneInvList" class="inv-list"></div>
+    <div class="modal-actions">
+      <button class="cancel" id="doneCancel">Batal</button>
+      <button class="save" id="doneConfirm">Tandai Done</button>
     </div>
   </div>
 </div>
@@ -643,21 +662,58 @@ async function loadMessages(scrollBottom) {
 
 // Done = muat closing message ke kotak balasan agar agent bisa edit dulu.
 // Thread baru pindah ke Done SETELAH agent menekan Kirim (lihat sendReply).
+// Done/Resolved menutup TANPA pesan penutup. Kalau nomor punya >1 invoice → buka modal
+// pilih-invoice (per-(phone,invoice)); hanya invoice yang dicentang di-Done, sisanya lanjut
+// Attempt 1/2/3. Kalau cuma 1 invoice → Done langsung seperti biasa.
+async function postDone(invoices) {
+  const fd = new FormData(); fd.append('status', 'done');
+  (invoices || []).forEach(inv => fd.append('invoices', inv));
+  const r = await apiFetch(`/api/inbox/status?phone=${encodeURIComponent(currentPhone)}`, { method: 'POST', body: fd });
+  if (!r.ok) { alert('Gagal: ' + await r.text()); return; }
+  const d = await r.json().catch(() => ({}));
+  toast(d.partial_done ? '✅ Sebagian invoice Done. Sisanya lanjut Attempt 2/3.' : '✅ Ditutup sebagai Done/Resolved.');
+  $('#doneModal').style.display = 'none';
+  await loadMessages(false); loadThreads();
+}
+
 $('#actDone').addEventListener('click', async () => {
   if (!currentPhone) return;
-  // Done/Resolved menutup thread TANPA mengirim pesan penutup. Alur validasi baru (blast via
-  // Tools Resmi + konfirmasi web, tim validator hubungi customer langsung) tidak butuh pesan
-  // penutup dari nomor Inti — lagipula kirim ke kontak yang tak aktif chat = error 463.
-  // Kalau agent MAU kirim penutup, ketik di kotak balasan lalu "Kirim" dulu, baru Done.
-  if (!confirm('Tutup thread ini sebagai Done / Resolved?\n\nTidak ada pesan penutup yang dikirim ke customer.')) return;
   $('#actDone').disabled = true;
   try {
-    const fd = new FormData(); fd.append('status', 'done');
-    const r = await apiFetch(`/api/inbox/status?phone=${encodeURIComponent(currentPhone)}`, { method: 'POST', body: fd });
-    if (!r.ok) { alert('Gagal: ' + await r.text()); return; }
-    toast('✅ Ditutup sebagai Done/Resolved (tanpa pesan penutup).');
-    await loadMessages(false); loadThreads();
+    let list = [];
+    try {
+      const jr = await apiFetch(`/api/inbox/invoices?phone=${encodeURIComponent(currentPhone)}`);
+      if (jr.ok) list = (await jr.json()).invoices || [];
+    } catch (_) {}
+    const unresolved = list.filter(x => !x.resolved);
+
+    // 0–1 invoice, atau semua sudah resolved → Done langsung (perilaku lama).
+    if (list.length <= 1 || unresolved.length <= 1) {
+      if (!confirm('Tutup thread ini sebagai Done / Resolved?\n\nTidak ada pesan penutup yang dikirim ke customer.')) return;
+      await postDone(null); // tanpa daftar → resolve semua invoice nomor ini
+      return;
+    }
+
+    // >1 invoice belum selesai → tampilkan picker (default KOSONG).
+    $('#doneInvList').innerHTML = list.map((x, i) => `
+      <div class="inv-row ${x.resolved ? 'resolved' : ''}">
+        <label>
+          <input type="checkbox" value="${esc(x.nomer_invoice)}" ${x.resolved ? 'checked disabled' : ''} data-inv>
+          <span class="inv-no">${esc(x.nomer_invoice)}</span>
+          ${x.resolved ? '<span class="inv-tag">sudah Done</span>' : ''}
+        </label>
+      </div>`).join('');
+    $('#doneModal').style.display = 'flex';
   } finally { $('#actDone').disabled = false; }
+});
+
+$('#doneCancel').addEventListener('click', () => { $('#doneModal').style.display = 'none'; });
+$('#doneModal').addEventListener('click', (e) => { if (e.target.id === 'doneModal') $('#doneModal').style.display = 'none'; });
+$('#doneConfirm').addEventListener('click', async () => {
+  const picked = [...document.querySelectorAll('#doneInvList input[data-inv]:not(:disabled):checked')].map(c => c.value);
+  if (picked.length === 0) { alert('Centang minimal 1 invoice yang selesai divalidasi.'); return; }
+  $('#doneConfirm').disabled = true;
+  try { await postDone(picked); } finally { $('#doneConfirm').disabled = false; }
 });
 
 // Invalid — nomor salah / perlu revisi. Tidak kirim pesan, pindah ke bucket Invalid.

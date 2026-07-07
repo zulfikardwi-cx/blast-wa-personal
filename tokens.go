@@ -147,15 +147,26 @@ func intiNumber() string {
 // token. Kalau nomor INTI belum diketahui (belum login & env kosong), kembalikan "" —
 // pemanggil (applyLink) menghapus baris {{link}}.
 func buildTriggerLink(phone, invoice, outlet, token string) string {
-	inti := intiNumber()
-	if inti == "" {
+	return buildTriggerLinkTo("", phone, invoice, outlet, token)
+}
+
+// buildTriggerLinkTo — sama seperti buildTriggerLink tapi tujuan nomor bisa dioverride
+// (dipakai halaman percobaan konfirmasi yang redirect ke nomor lain). target kosong →
+// fallback ke nomor INTI. target di-normalisasi (0.../8.../62...). Kembalikan "" kalau
+// tak ada nomor tujuan yang valid.
+func buildTriggerLinkTo(target, phone, invoice, outlet, token string) string {
+	num := normalizePhone(target)
+	if num == "" {
+		num = intiNumber()
+	}
+	if num == "" {
 		return ""
 	}
 	prefilled := prefillTemplate
 	prefilled = strings.ReplaceAll(prefilled, "{{nama_outlet}}", outlet)
 	prefilled = strings.ReplaceAll(prefilled, "{{nomer_invoice}}", invoice)
 	prefilled = strings.ReplaceAll(prefilled, "{{token}}", token)
-	return "https://wa.me/" + inti + "?text=" + url.QueryEscape(prefilled)
+	return "https://wa.me/" + num + "?text=" + url.QueryEscape(prefilled)
 }
 
 // applyLink — ganti placeholder {{link}} pada body blast dengan link trigger wa.me ke INTI.

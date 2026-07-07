@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Konfirmasi Validasi — majoo</title>
+<style>
+  :root{
+    --bg:#f4f7fb; --card:#ffffff; --ink:#0f1a2e; --muted:#5b6b86; --line:#e3e9f2;
+    --teal:#2DBDB6; --teal-d:#1a9c95; --lime:#9ACF87; --danger:#e5484d; --ok:#1a9c95;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:var(--bg);color:var(--ink);font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;max-width:440px;width:100%;
+    padding:28px 24px;box-shadow:0 8px 30px rgba(16,26,46,.06)}
+  .brand{display:flex;align-items:center;margin-bottom:18px}
+  .brand .logo{height:30px;width:auto;display:block}
+  h1{font-size:19px;margin:4px 0 6px}
+  p.sub{color:var(--muted);font-size:14px;margin:0 0 20px}
+  label{display:block;font-size:13px;color:var(--muted);margin:0 0 6px;font-weight:600}
+  input{width:100%;padding:14px 16px;border:1.5px solid var(--line);border-radius:11px;font-size:16px;
+    letter-spacing:1px;text-transform:uppercase;text-align:center;font-family:ui-monospace,Menlo,monospace;color:var(--ink)}
+  input:focus{outline:none;border-color:var(--teal)}
+  button{width:100%;margin-top:16px;padding:14px;border:0;border-radius:11px;background:var(--teal);color:#fff;
+    font-size:16px;font-weight:700;cursor:pointer;transition:background .15s}
+  button:hover:not(:disabled){background:var(--teal-d)}
+  button:disabled{opacity:.55;cursor:not-allowed}
+  .msg{margin-top:18px;padding:14px 16px;border-radius:11px;font-size:14.5px;display:none}
+  .msg.ok{display:block;background:#e7f7f5;border:1px solid #b7e6e1;color:#0c5;color:var(--ok)}
+  .msg.err{display:block;background:#fdecec;border:1px solid #f7c9cb;color:var(--danger)}
+  .msg .big{font-size:16px;font-weight:700;display:block;margin-bottom:4px}
+  .wabtn{display:block;margin-top:14px;padding:13px;border-radius:11px;background:#25D366;color:#fff;font-weight:700;text-decoration:none;text-align:center}
+  .wabtn:hover{filter:brightness(1.05)}
+  .foot{margin-top:22px;text-align:center;color:var(--muted);font-size:12px}
+  .hint{color:var(--muted);font-size:12.5px;margin-top:8px}
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="brand"><img src="assets/majoo-logo.svg" alt="majoo" class="logo" /></div>
+    <h1>Konfirmasi Validasi</h1>
+    <p class="sub">Masukkan <b>Nomor Invoice</b> atau <b>Kode Referensi</b> yang Anda terima pada pesan WhatsApp untuk mengonfirmasi bahwa Anda siap melakukan validasi. Tim Validator kami akan menghubungi Anda.</p>
+
+    <form id="form">
+      <label for="kode">Nomor Invoice atau Kode Referensi</label>
+      <input id="kode" name="kode" autocomplete="off" autocapitalize="characters" spellcheck="false"
+             inputmode="latin" maxlength="40" placeholder="Nomor invoice atau kode referensi" required />
+      <div class="hint">Contoh: INV/NEW/202606/01226 atau HWYTSJJU</div>
+      <button id="btn" type="submit">Konfirmasi</button>
+    </form>
+
+    <div class="msg" id="msg"></div>
+    <div class="foot">© majoo · Butuh bantuan? Hubungi tim majoo.</div>
+  </div>
+
+<script>
+const $ = s => document.querySelector(s);
+const form = $('#form'), btn = $('#btn'), msg = $('#msg');
+
+function show(kind, html){ msg.className = 'msg ' + kind; msg.innerHTML = html; }
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const kode = $('#kode').value.trim().toUpperCase();
+  if (!kode) return;
+  btn.disabled = true; const orig = btn.textContent; btn.textContent = 'Memproses…';
+  msg.className = 'msg';
+  try {
+    const r = await fetch('/api/konfirmasi-coba', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kode })
+    });
+    const d = await r.json();
+    if (d.ok) {
+      form.style.display = 'none';
+      const waLink = d.wa_link || '';
+      show('ok', '<span class="big">✅ Konfirmasi berhasil!</span>' +
+        'Terima kasih' + (d.nama_outlet ? ', <b>' + esc(d.nama_outlet) + '</b>' : '') + '.' +
+        (d.nomer_invoice ? '<br/>Invoice: <b>' + esc(d.nomer_invoice) + '</b>' : '') +
+        (waLink
+          ? '<br/><br/>Anda akan diarahkan ke WhatsApp untuk terhubung dengan Tim Validator kami. Jika tidak terbuka otomatis, tekan tombol di bawah lalu <b>kirim pesannya</b>.' +
+            '<a class="wabtn" href="' + esc(waLink) + '">💬 Lanjut ke WhatsApp</a>'
+          : '<br/>Tim Validator majoo akan segera menghubungi Anda melalui WhatsApp.'));
+      if (waLink) setTimeout(() => { window.location.href = waLink; }, 1500);
+    } else {
+      show('err', esc(d.error || 'Kode tidak valid.'));
+      btn.disabled = false; btn.textContent = orig;
+    }
+  } catch (err) {
+    show('err', 'Gagal terhubung. Periksa koneksi internet Anda dan coba lagi.');
+    btn.disabled = false; btn.textContent = orig;
+  }
+});
+
+function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+</script>
+</body>
+</html>
