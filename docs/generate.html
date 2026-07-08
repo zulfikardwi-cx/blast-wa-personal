@@ -98,6 +98,12 @@
 INV/NEW/202606/01818,Rm Dapur Mirasa,6281383154078,01/07/2026,LEADS/202605/905889</pre>
     </div>
 
+    <label style="display:flex;align-items:flex-start;gap:8px;margin-top:14px;cursor:pointer;font-weight:400">
+      <input type="checkbox" id="resetCycle" style="margin-top:3px" />
+      <span>🔁 <b>Mulai ulang dari Attempt 1</b> (re-blast putaran baru).<br/>
+      <small style="color:var(--muted)">Untuk invoice yang <b>sudah selesai Attempt 1-2-3</b> dan ingin di-blast ulang dari awal. Membuka <b>cycle baru</b>: catat Attempt 1 baru di Riwayat Blast, thread balik ke <b>After Blast</b>, dan attempt dihitung ulang 1→2→3. Tanpa centang ini, invoice yang sudah Attempt 3 akan di-skip.</small></span>
+    </label>
+
     <button class="primary" id="genBtn" disabled>🔗 Generate &amp; Download CSV</button>
     <div class="msg" id="msg"></div>
 
@@ -180,11 +186,14 @@ function hideMsg(){ $('#msg').className='msg'; $('#msg').textContent=''; }
 $('#genBtn').addEventListener('click', async () => {
   const f = $('#csv').files[0];
   if (!f) return;
+  const reset = $('#resetCycle').checked;
+  if (reset && !confirm('Mode MULAI ULANG Attempt 1 aktif.\n\nSemua invoice di CSV akan dibuka putaran baru (cycle) dan dicatat sebagai Attempt 1 lagi — thread yang sudah selesai/force-close akan balik ke After Blast.\n\nLanjutkan?')) return;
   const btn = $('#genBtn'); const orig = btn.textContent;
   btn.disabled = true; btn.textContent = '⏳ Memproses...';
   hideMsg();
   try {
     const fd = new FormData(); fd.append('csv', f);
+    if (reset) fd.append('reset', '1');
     const r = await apiFetch('/api/generate-links', { method:'POST', body: fd });
     if (!r.ok) { showMsg('err', 'Gagal: ' + (await r.text())); return; }
     const total = r.headers.get('X-Rows-Total') || '?';

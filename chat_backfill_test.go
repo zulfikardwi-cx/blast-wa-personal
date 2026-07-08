@@ -22,7 +22,7 @@ func setupBackfillDB(t *testing.T) {
 		`CREATE TABLE blast_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, attempt INTEGER DEFAULT 1)`,
 		`CREATE TABLE blast_recipients (id INTEGER PRIMARY KEY AUTOINCREMENT, blast_log_id INTEGER, phone TEXT,
 			nama_outlet TEXT, nomer_invoice TEXT, status TEXT, error TEXT, message TEXT, sent_at TEXT,
-			created_at TEXT DEFAULT (datetime('now')))`,
+			created_at TEXT DEFAULT (datetime('now')), attempt INTEGER, cycle INTEGER NOT NULL DEFAULT 1)`,
 		`CREATE TABLE chat_threads (phone TEXT PRIMARY KEY, nama_outlet TEXT, nomer_invoice TEXT, last_blast_id INTEGER,
 			last_message_at TEXT, last_message_preview TEXT, last_message_direction TEXT, status TEXT,
 			unread_count INTEGER DEFAULT 0, current_attempt INTEGER DEFAULT 1, last_attempt_at TEXT,

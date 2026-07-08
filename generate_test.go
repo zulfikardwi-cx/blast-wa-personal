@@ -140,6 +140,110 @@ func TestGenerateLinks_AutoAdvanceAttempt(t *testing.T) {
 	}
 }
 
+// genCSV — POST /api/generate-links utk 1 invoice, opsional mode reset.
+func genCSV(t *testing.T, phone, outlet, inv string, reset bool) {
+	t.Helper()
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, _ := mw.CreateFormFile("csv", "in.csv")
+	fw.Write([]byte("phone,nama_outlet,nomer_invoice\n" + phone + "," + outlet + "," + inv + "\n"))
+	if reset {
+		_ = mw.WriteField("reset", "1")
+	}
+	mw.Close()
+	req := httptest.NewRequest("POST", "/api/generate-links", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rec := httptest.NewRecorder()
+	handleGenerateLinks(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("generate status %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// Invoice yang sudah selesai Attempt 1-2-3 (cycle 1): mode normal SKIP (mentok 3), mode reset
+// membuka cycle 2 & mulai Attempt 1 lagi + reset thread + report menampilkan progres cycle baru.
+func TestGenerateLinks_ResetCycleRestartsAttempt1(t *testing.T) {
+	setupTokenDB(t)
+	phone, inv, outlet := "6281383154078", "INV/NEW/202606/01818", "Rm Dapur Mirasa"
+	// Seed cycle 1 penuh: Attempt 1/2/3 sent di hari lampau, thread force_close.
+	for _, s := range []struct {
+		att int
+		ts  string
+	}{{1, "2026-07-01T09:00:00+07:00"}, {2, "2026-07-03T09:00:00+07:00"}, {3, "2026-07-05T09:00:00+07:00"}} {
+		res, _ := auditDB.Exec(`INSERT INTO blast_logs (started_at,template,attempt,total,sent) VALUES (?,'tpl',?,1,1)`, s.ts, s.att)
+		id, _ := res.LastInsertId()
+		auditDB.Exec(`INSERT INTO blast_recipients (blast_log_id,phone,nama_outlet,nomer_invoice,status,sent_at,attempt,cycle) VALUES (?,?,?,?, 'sent',?,?,1)`, id, phone, outlet, inv, s.ts, s.att)
+	}
+	auditDB.Exec(`INSERT INTO chat_threads (phone,nama_outlet,nomer_invoice,status,current_attempt) VALUES (?,?,?, 'force_close',3)`, phone, outlet, inv)
+
+	// Mode normal → sudah Attempt 3 → tidak menambah record.
+	genCSV(t, "081383154078", outlet, inv, false)
+	var n int
+	auditDB.QueryRow(`SELECT COUNT(*) FROM blast_recipients WHERE phone=? AND nomer_invoice=?`, phone, inv).Scan(&n)
+	if n != 3 {
+		t.Fatalf("mode normal menambah record utk invoice Attempt-3 (total=%d, want 3)", n)
+	}
+
+	// Mode reset → cycle 2, Attempt 1 baru.
+	genCSV(t, "081383154078", outlet, inv, true)
+	var cycle, cycleAtt int
+	auditDB.QueryRow(`SELECT COALESCE(MAX(cycle),0) FROM blast_recipients WHERE phone=? AND nomer_invoice=?`, phone, inv).Scan(&cycle)
+	if cycle != 2 {
+		t.Fatalf("setelah reset cycle terkini = %d, want 2", cycle)
+	}
+	auditDB.QueryRow(`SELECT COALESCE(MAX(COALESCE(r.attempt,b.attempt)),0) FROM blast_recipients r JOIN blast_logs b ON r.blast_log_id=b.id WHERE r.phone=? AND r.nomer_invoice=? AND r.cycle=2`, phone, inv).Scan(&cycleAtt)
+	if cycleAtt != 1 {
+		t.Errorf("attempt di cycle 2 = %d, want 1", cycleAtt)
+	}
+	// Thread reset ke after_blast attempt 1.
+	var st string
+	var ca int
+	auditDB.QueryRow(`SELECT status, current_attempt FROM chat_threads WHERE phone=?`, phone).Scan(&st, &ca)
+	if st != "after_blast" || ca != 1 {
+		t.Errorf("thread setelah reset = (%s, att %d), want (after_blast, 1)", st, ca)
+	}
+	// Report Belum Respons: kolom hanya dari cycle terkini → Attempt 1 saja, 2/3 kosong.
+	rowsRep, err := queryUnresponsive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, rr := range rowsRep {
+		if rr.NomerInvoice == inv {
+			found = true
+			if rr.Attempt1 != "No Response" || rr.Attempt2 != "-" || rr.Attempt3 != "-" {
+				t.Errorf("report cycle baru = (a1=%q a2=%q a3=%q), want (No Response, -, -)", rr.Attempt1, rr.Attempt2, rr.Attempt3)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("invoice tidak muncul di report Belum Respons setelah reset")
+	}
+}
+
+// invoiceStillNeedsRetry harus cycle-aware: setelah reset (cycle 2 baru Attempt 1), invoice
+// eligible Attempt 2 lagi — bukan dianggap mentok 3 dari cycle lama.
+func TestRetry_CycleAwareAfterReset(t *testing.T) {
+	setupTokenDB(t)
+	phone, inv := "628111", "INV/CYCLE"
+	// cycle 1 penuh (1-2-3) + cycle 2 baru Attempt 1, semua di hari lampau (bukan hari ini).
+	seed := []struct {
+		att, cyc int
+		ts       string
+	}{{1, 1, "2026-07-01T09:00:00+07:00"}, {2, 1, "2026-07-02T09:00:00+07:00"}, {3, 1, "2026-07-03T09:00:00+07:00"}, {1, 2, "2026-07-05T09:00:00+07:00"}}
+	for _, s := range seed {
+		res, _ := auditDB.Exec(`INSERT INTO blast_logs (started_at,template,attempt,total,sent) VALUES (?,'tpl',?,1,1)`, s.ts, s.att)
+		id, _ := res.LastInsertId()
+		auditDB.Exec(`INSERT INTO blast_recipients (blast_log_id,phone,nomer_invoice,status,sent_at,attempt,cycle) VALUES (?,?,?, 'sent',?,?,?)`, id, phone, inv, s.ts, s.att, s.cyc)
+	}
+	auditDB.Exec(`INSERT INTO chat_threads (phone,nomer_invoice,status,current_attempt) VALUES (?,?, 'after_blast',1)`, phone, inv)
+
+	next, ok := invoiceStillNeedsRetry("majoo", "chat_threads", "blast_recipients", "blast_logs", phone, inv, startOfTodayWIB())
+	if !ok || next != 2 {
+		t.Errorf("cycle-aware retry = (%d,%v), want (2,true) — harus baca cycle 2 (maxAtt 1), bukan cycle 1 (maxAtt 3)", next, ok)
+	}
+}
+
 func TestGenerateLinks_MissingRequiredHeader(t *testing.T) {
 	setupTokenDB(t)
 	body, ctype := multipartCSV(t, "phone,outlet_salah,invoice_salah\n0813,X,INV1\n")

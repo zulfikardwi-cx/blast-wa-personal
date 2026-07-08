@@ -23,17 +23,23 @@ import (
 	"time"
 )
 
-// invoiceAttemptState — attempt tertinggi yang SUDAH terkirim untuk (phone, invoice) + waktu
-// kirim terakhirnya. Dipakai handleGenerateLinks untuk menentukan attempt berikutnya (auto-naik).
-func invoiceAttemptState(phone, invoice string) (int, string) {
-	var maxAtt int
-	var lastSent string
+// invoiceCycleState — status putaran (cycle) TERKINI untuk (phone, invoice):
+//   cycle    : nomor putaran terkini (0 = invoice belum pernah tercatat)
+//   maxAtt   : attempt tertinggi yang SUDAH 'sent' DALAM cycle itu (0 = belum ada sent)
+//   lastSent : waktu kirim terakhir di cycle itu
+// Dipakai handleGenerateLinks: mode normal → attempt berikutnya dalam cycle (maks 3);
+// mode reset → buka cycle+1 dan mulai Attempt 1 lagi.
+func invoiceCycleState(phone, invoice string) (cycle, maxAtt int, lastSent string) {
+	cycle = currentInvoiceCycle(phone, invoice)
+	if cycle == 0 {
+		return 0, 0, ""
+	}
 	_ = auditDB.QueryRow(`
 SELECT COALESCE(MAX(CASE WHEN r.status='sent' THEN COALESCE(r.attempt,b.attempt) ELSE 0 END),0),
        COALESCE(MAX(CASE WHEN r.status='sent' THEN COALESCE(r.sent_at, r.created_at) END),'')
 FROM blast_recipients r JOIN blast_logs b ON r.blast_log_id=b.id
-WHERE r.phone=? AND COALESCE(r.nomer_invoice,'')=COALESCE(?,'')`, phone, invoice).Scan(&maxAtt, &lastSent)
-	return maxAtt, lastSent
+WHERE r.phone=? AND COALESCE(r.nomer_invoice,'')=COALESCE(?,'') AND r.cycle=?`, phone, invoice, cycle).Scan(&maxAtt, &lastSent)
+	return cycle, maxAtt, lastSent
 }
 
 // handleGenerateLinks — POST /api/generate-links. Multipart form field "csv".
@@ -95,9 +101,14 @@ func handleGenerateLinks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Mode reset ("mulai ulang Attempt 1"): untuk invoice yang sudah selesai satu putaran
+	// (Attempt 1-2-3), buka CYCLE baru & mulai Attempt 1 lagi (re-blast campaign berikutnya).
+	// Default (kosong) = mode normal: lanjutkan attempt berikutnya dalam cycle terkini.
+	reset := r.FormValue("reset") == "1" || strings.EqualFold(r.FormValue("mode"), "reset")
+
 	// Generate = masuk flow blast (dikirim tools eksternal) → catat ke Riwayat Blast pada
-	// ATTEMPT YANG BENAR per invoice: attempt = (attempt terkirim tertinggi sebelumnya) + 1,
-	// mentok di 3. Invoice baru → Attempt 1; yang sudah pernah Attempt 1 → Attempt 2; dst.
+	// ATTEMPT YANG BENAR per invoice DALAM CYCLE TERKINI: attempt = (attempt terkirim
+	// tertinggi di cycle ini) + 1, mentok di 3. Invoice baru / cycle baru → Attempt 1.
 	// Guard "1 attempt/hari per invoice" mencegah dobel saat CSV yang sama di-generate ulang
 	// di hari yang sama. Satu upload bisa berisi campuran attempt → entri Riwayat Blast dibuat
 	// per-attempt (lazy), supaya kolom Attempt di Riwayat & report Belum Respons akurat.
@@ -143,14 +154,30 @@ func handleGenerateLinks(w http.ResponseWriter, r *http.Request) {
 		if phone != "" {
 			kode = getOrCreateToken(phone, invoice, outlet)
 			generated++
-			maxAtt, lastSent := invoiceAttemptState(phone, invoice)
-			// Catat attempt berikutnya, KECUALI sudah mentok Attempt 3 atau sudah dikirimi
-			// attempt hari ini (hindari dobel saat re-generate CSV yang sama).
-			if maxAtt < 3 && !attemptedToday(lastSent, startToday) {
-				att := maxAtt + 1
+			cycle, maxAtt, lastSent := invoiceCycleState(phone, invoice)
+			// Tentukan attempt & cycle yang akan dicatat. att=0 → skip (tak dicatat).
+			att, recCycle := 0, 0
+			if reset {
+				// Mulai ulang: buka cycle baru, Attempt 1. Guard 1x/hari mencegah dobel-reset
+				// saat CSV yang sama di-generate ulang di hari yang sama.
+				if !attemptedToday(lastSent, startToday) {
+					att = 1
+					recCycle = cycle + 1 // cycle 0 (invoice baru) → 1
+				}
+			} else {
+				// Lanjutan cycle terkini: attempt berikutnya, mentok 3, maks 1/hari.
+				if maxAtt < 3 && !attemptedToday(lastSent, startToday) {
+					att = maxAtt + 1
+					recCycle = cycle
+					if recCycle < 1 {
+						recCycle = 1 // invoice baru → cycle 1
+					}
+				}
+			}
+			if att > 0 {
 				logID := getLog(att)
 				body := applyLink(renderTemplateWithVars(GetAttemptTemplate(att), outlet, invoice), phone, invoice, outlet)
-				_ = recordRetryRecipient(logID, phone, outlet, invoice, "sent", "", body, now)
+				_ = recordRetryRecipientInCycle(logID, phone, outlet, invoice, "sent", "", body, now, recCycle)
 				if att == 1 {
 					ensureThreadAfterBlast(phone, outlet, invoice, logID, body, now)
 				} else {

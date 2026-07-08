@@ -22,7 +22,7 @@ func setupResolvedDB(t *testing.T) {
 	for _, s := range []string{
 		`CREATE TABLE blast_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, attempt INTEGER DEFAULT 1)`,
 		`CREATE TABLE blast_recipients (id INTEGER PRIMARY KEY AUTOINCREMENT, blast_log_id INTEGER, phone TEXT,
-			nama_outlet TEXT, nomer_invoice TEXT, status TEXT, sent_at TEXT, created_at TEXT DEFAULT (datetime('now')))`,
+			nama_outlet TEXT, nomer_invoice TEXT, status TEXT, sent_at TEXT, created_at TEXT DEFAULT (datetime('now')), attempt INTEGER, cycle INTEGER NOT NULL DEFAULT 1)`,
 		`CREATE TABLE resolved_invoices (suite TEXT, phone TEXT, nomer_invoice TEXT, nama_outlet TEXT,
 			resolver_email TEXT, resolver_name TEXT, resolved_at TEXT, PRIMARY KEY(suite,phone,nomer_invoice))`,
 	} {

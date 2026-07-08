@@ -33,6 +33,9 @@ JOIN ` + logsTbl + ` b ON r.blast_log_id = b.id
 JOIN ` + threadsTbl + ` t ON t.phone = r.phone
 WHERE t.status NOT IN ('done','invalid','on_going','scheduled','force_close','konfirmasi_web')
   AND COALESCE(r.nomer_invoice,'') != ''
+  -- Hanya hitung baris di CYCLE (putaran) TERKINI invoice. Data lama semua cycle=1 → no-op;
+  -- setelah reset re-blast, attempt dihitung ulang dari cycle baru (Attempt 1-2-3 lagi).
+  AND r.cycle = (SELECT MAX(cycle) FROM ` + recvTbl + ` r2 WHERE r2.phone=r.phone AND COALESCE(r2.nomer_invoice,'')=COALESCE(r.nomer_invoice,''))
   AND NOT EXISTS (SELECT 1 FROM excluded_invoices x WHERE x.suite=? AND x.phone=r.phone AND x.nomer_invoice=r.nomer_invoice)
   AND NOT EXISTS (SELECT 1 FROM resolved_invoices rv WHERE rv.suite=? AND rv.phone=r.phone AND rv.nomer_invoice=r.nomer_invoice)
 GROUP BY r.phone, r.nomer_invoice
@@ -86,7 +89,8 @@ func invoiceStillNeedsRetry(suite, threadsTbl, recvTbl, logsTbl, phone, invoice 
 SELECT COALESCE(MAX(CASE WHEN r.status='sent' THEN COALESCE(r.attempt,b.attempt) ELSE 0 END),0),
        COALESCE(MAX(CASE WHEN r.status='sent' THEN COALESCE(r.sent_at, r.created_at) END),'')
 FROM `+recvTbl+` r JOIN `+logsTbl+` b ON r.blast_log_id=b.id
-WHERE r.phone=? AND r.nomer_invoice=?`, phone, invoice).Scan(&maxAtt, &lastSent)
+WHERE r.phone=? AND r.nomer_invoice=?
+  AND r.cycle = (SELECT MAX(cycle) FROM `+recvTbl+` r2 WHERE r2.phone=r.phone AND COALESCE(r2.nomer_invoice,'')=COALESCE(r.nomer_invoice,''))`, phone, invoice).Scan(&maxAtt, &lastSent)
 	if err != nil || maxAtt < 1 || maxAtt >= 3 {
 		return 0, false
 	}
@@ -121,6 +125,7 @@ SELECT COUNT(*) FROM (
   SELECT r.nomer_invoice, MAX(CASE WHEN r.status='sent' THEN COALESCE(r.attempt,b.attempt) ELSE 0 END) m
   FROM `+recvTbl+` r JOIN `+logsTbl+` b ON r.blast_log_id=b.id
   WHERE r.phone=? AND COALESCE(r.nomer_invoice,'')!=''
+    AND r.cycle = (SELECT MAX(cycle) FROM `+recvTbl+` r2 WHERE r2.phone=r.phone AND COALESCE(r2.nomer_invoice,'')=COALESCE(r.nomer_invoice,''))
   GROUP BY r.nomer_invoice HAVING m BETWEEN 1 AND 2
 )`, phone).Scan(&c)
 	return c > 0

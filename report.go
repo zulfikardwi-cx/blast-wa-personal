@@ -72,6 +72,9 @@ JOIN blast_logs b ON r.blast_log_id = b.id
 JOIN chat_threads t ON t.phone = r.phone
 WHERE t.status IN ('after_blast', 'in_progress', 'rejected', 'force_close')
   AND COALESCE(r.nomer_invoice, '') != ''
+  -- Kolom Attempt 1/2/3 hanya dari CYCLE (putaran) TERKINI. Data lama semua cycle=1 → no-op;
+  -- setelah reset re-blast, report menampilkan progres putaran baru (Attempt 1 lagi), bukan lama.
+  AND r.cycle = (SELECT MAX(cycle) FROM blast_recipients r2 WHERE r2.phone=r.phone AND COALESCE(r2.nomer_invoice,'')=COALESCE(r.nomer_invoice,''))
   AND NOT EXISTS (SELECT 1 FROM excluded_invoices x WHERE x.suite='majoo' AND x.phone=r.phone AND x.nomer_invoice=r.nomer_invoice)
   AND NOT EXISTS (SELECT 1 FROM resolved_invoices rv WHERE rv.suite='majoo' AND rv.phone=r.phone AND rv.nomer_invoice=r.nomer_invoice)
 GROUP BY r.phone, r.nomer_invoice

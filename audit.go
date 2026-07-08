@@ -67,7 +67,24 @@ CREATE INDEX IF NOT EXISTS idx_recipients_phone ON blast_recipients(phone);
 	if _, e := db.Exec(`ALTER TABLE blast_recipients ADD COLUMN attempt INTEGER`); e != nil && !strings.Contains(e.Error(), "duplicate column") {
 		return e
 	}
+	// Migrasi: kolom cycle (putaran blast). 1 = putaran normal (Attempt 1-2-3 pertama).
+	// Re-blast "mulai ulang" untuk invoice yang sudah selesai 3x menaikkan cycle → attempt
+	// dihitung ULANG per cycle (1-2-3 lagi). Semua baris lama default cycle=1, jadi semua
+	// query yang memfilter "cycle terkini" identik dgn sebelumnya SAMPAI ada reset (no-op).
+	if _, e := db.Exec(`ALTER TABLE blast_recipients ADD COLUMN cycle INTEGER NOT NULL DEFAULT 1`); e != nil && !strings.Contains(e.Error(), "duplicate column") {
+		return e
+	}
 	return nil
+}
+
+// currentInvoiceCycle — cycle (putaran) terkini untuk (phone,invoice) di blast_recipients
+// majoo, lintas SEMUA status (sent/failed). 0 kalau invoice belum pernah tercatat sama sekali.
+// Baris baru (continuation) ikut cycle ini; reset re-blast memakai cycle+1.
+func currentInvoiceCycle(phone, invoice string) int {
+	var c int
+	_ = auditDB.QueryRow(`SELECT COALESCE(MAX(cycle),0) FROM blast_recipients
+		WHERE phone=? AND COALESCE(nomer_invoice,'')=COALESCE(?,'')`, phone, invoice).Scan(&c)
+	return c
 }
 
 // backfillRecipientAttempts — set blast_recipients.attempt = urutan kronologis kirim ke-N per
@@ -77,11 +94,13 @@ CREATE INDEX IF NOT EXISTS idx_recipients_phone ON blast_recipients(phone);
 // tiap startup; baris baru (attempt NULL) tetap benar via COALESCE(r.attempt, b.attempt) sampai
 // backfill berikutnya menstempelnya. majoo (blast_recipients) — Zopoz punya tabel sendiri.
 func backfillRecipientAttempts() {
+	// Ranking attempt di-PARTITION per cycle: tiap putaran blast punya Attempt 1-2-3 sendiri.
+	// Data lama (semua cycle=1) tak berubah; hanya setelah reset re-blast cycle>1 muncul.
 	_, err := auditDB.Exec(`
 WITH ranked AS (
   SELECT r.id,
          MIN(3, ROW_NUMBER() OVER (
-           PARTITION BY r.phone, COALESCE(r.nomer_invoice,'')
+           PARTITION BY r.phone, COALESCE(r.nomer_invoice,''), r.cycle
            ORDER BY COALESCE(NULLIF(r.sent_at,''), r.created_at) ASC, r.id ASC)) AS att
   FROM blast_recipients r
   WHERE COALESCE(r.nomer_invoice,'') != ''
@@ -111,9 +130,14 @@ func recordRecipient(blastLogID int64, rec *RecipientStatus) error {
 	if blastLogID == 0 {
 		return nil
 	}
+	// Ikut cycle terkini invoice (min 1) — blast live biasanya cycle 1 (invoice baru).
+	c := currentInvoiceCycle(rec.Phone, rec.NomerInv)
+	if c < 1 {
+		c = 1
+	}
 	_, err := auditDB.Exec(
-		`INSERT INTO blast_recipients (blast_log_id, phone, nama_outlet, nomer_invoice, status, error, message, sent_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		blastLogID, rec.Phone, rec.NamaOutlet, rec.NomerInv, rec.Status, rec.Error, rec.Message, rec.SentAt,
+		`INSERT INTO blast_recipients (blast_log_id, phone, nama_outlet, nomer_invoice, status, error, message, sent_at, cycle) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		blastLogID, rec.Phone, rec.NamaOutlet, rec.NomerInv, rec.Status, rec.Error, rec.Message, rec.SentAt, c,
 	)
 	return err
 }
@@ -149,12 +173,27 @@ func recordRetryBatchStart(email, name, template string, attempt, total int, sta
 }
 
 func recordRetryRecipient(logID int64, phone, outlet, invoice, status, errMsg, message string, sentAt time.Time) error {
+	// Continuation: ikut cycle terkini invoice (min 1). Reset re-blast pakai
+	// recordRetryRecipientInCycle dengan cycle eksplisit (cycle+1).
+	c := currentInvoiceCycle(phone, invoice)
+	if c < 1 {
+		c = 1
+	}
+	return recordRetryRecipientInCycle(logID, phone, outlet, invoice, status, errMsg, message, sentAt, c)
+}
+
+// recordRetryRecipientInCycle — sama seperti recordRetryRecipient tapi cycle di-set eksplisit.
+// Dipakai jalur reset re-blast (generate "mulai ulang Attempt 1") untuk membuka cycle baru.
+func recordRetryRecipientInCycle(logID int64, phone, outlet, invoice, status, errMsg, message string, sentAt time.Time, cycle int) error {
 	if logID == 0 {
 		return nil
 	}
+	if cycle < 1 {
+		cycle = 1
+	}
 	_, err := auditDB.Exec(
-		`INSERT INTO blast_recipients (blast_log_id, phone, nama_outlet, nomer_invoice, status, error, message, sent_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		logID, phone, outlet, invoice, status, nullableStr(errMsg), nullableStr(message), sentAt.Format(time.RFC3339),
+		`INSERT INTO blast_recipients (blast_log_id, phone, nama_outlet, nomer_invoice, status, error, message, sent_at, cycle) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		logID, phone, outlet, invoice, status, nullableStr(errMsg), nullableStr(message), sentAt.Format(time.RFC3339), cycle,
 	)
 	return err
 }

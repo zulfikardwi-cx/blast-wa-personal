@@ -16,6 +16,7 @@ import (
 	"math/rand"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -60,7 +61,15 @@ CREATE TABLE IF NOT EXISTS zopoz_blast_recipients (
 CREATE INDEX IF NOT EXISTS idx_zopoz_recipients_blast ON zopoz_blast_recipients(blast_log_id);
 CREATE INDEX IF NOT EXISTS idx_zopoz_recipients_phone ON zopoz_blast_recipients(phone);
 `)
-	return err
+	if err != nil {
+		return err
+	}
+	// Migrasi: kolom cycle (putaran blast) supaya query retry BERSAMA (retry_invoice.go yang
+	// memfilter r.cycle) tetap valid untuk Zopoz. Zopoz tak punya fitur reset → selalu cycle=1.
+	if _, e := auditDB.Exec(`ALTER TABLE zopoz_blast_recipients ADD COLUMN cycle INTEGER NOT NULL DEFAULT 1`); e != nil && !strings.Contains(e.Error(), "duplicate column") {
+		return e
+	}
+	return nil
 }
 
 func zopozRecordBlastStart(j *BlastJob) (int64, error) {

@@ -20,7 +20,7 @@ func setupAttemptDB(t *testing.T) {
 	for _, s := range []string{
 		`CREATE TABLE blast_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, attempt INTEGER DEFAULT 1)`,
 		`CREATE TABLE blast_recipients (id INTEGER PRIMARY KEY AUTOINCREMENT, blast_log_id INTEGER, phone TEXT,
-			nomer_invoice TEXT, status TEXT, sent_at TEXT, created_at TEXT DEFAULT (datetime('now')), attempt INTEGER)`,
+			nomer_invoice TEXT, status TEXT, sent_at TEXT, created_at TEXT DEFAULT (datetime('now')), attempt INTEGER, cycle INTEGER NOT NULL DEFAULT 1)`,
 	} {
 		if _, err := db.Exec(s); err != nil {
 			t.Fatalf("schema: %v", err)
