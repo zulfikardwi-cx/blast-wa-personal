@@ -67,6 +67,7 @@
   .dot.force_close{background:#64748b}
   .dot.inbound_non_blast{background:#f472b6}
   .dot.outside_blast{background:#94a3b8}
+  .dot.konfirmasi_web{background:#fb923c}
 
   .user-card{margin-top:auto;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px;font-size:11px;color:var(--muted)}
   .user-card b{color:var(--text);display:block;font-size:12px;font-weight:600}
@@ -105,6 +106,7 @@
   .status-tag.force_close{background:rgba(100,116,139,.2);color:#94a3b8}
   .status-tag.inbound_non_blast{background:rgba(244,114,182,.2);color:#f472b6}
   .status-tag.outside_blast{background:rgba(148,163,184,.2);color:#94a3b8}
+  .status-tag.konfirmasi_web{background:rgba(251,146,60,.2);color:#fb923c}
   .thread-item .team-tag{display:inline-block;font-size:9px;padding:1px 7px;border-radius:8px;margin-top:6px;margin-left:6px;font-weight:600;background:rgba(45,189,182,.18);color:var(--teal);text-transform:uppercase;letter-spacing:.3px}
   .thread-item .unread{background:var(--lime);color:#0b1220;font-size:10px;font-weight:600;padding:1px 6px;border-radius:8px;position:absolute;top:14px;right:18px}
   .empty{padding:60px 20px;text-align:center;color:var(--muted);font-size:13px}
@@ -160,6 +162,10 @@
   .msg.in{background:var(--bubble-in);align-self:flex-start;border-bottom-left-radius:2px}
   .msg.out{background:var(--bubble-out);align-self:flex-end;border-bottom-right-radius:2px}
   .msg.system{background:transparent;align-self:center;color:var(--muted);font-size:11px;font-style:italic;max-width:80%;text-align:center;padding:4px 12px;border:1px dashed var(--line);border-radius:6px;margin:8px 0}
+  /* private note (catatan internal) — bukan pesan customer */
+  .msg.note{background:rgba(251,191,36,.1);border:1px dashed rgba(251,191,36,.55);align-self:center;max-width:78%;color:#fde68a}
+  .msg.note .note-label{font-size:10px;font-weight:700;color:#fbbf24;text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px;display:flex;align-items:center;gap:5px}
+  .msg.note .meta{color:#d1a94a}
   .msg .media{color:var(--warn);font-style:italic}
   .msg-media{max-width:240px;max-height:300px;border-radius:8px;display:block;cursor:pointer}
   video.msg-media{cursor:default}
@@ -174,6 +180,16 @@
   .reply-box button:disabled{opacity:.5;cursor:not-allowed}
   .reply-box.locked{opacity:.5;pointer-events:none}
   .reply-box.locked textarea{cursor:not-allowed}
+  /* Reply / Private Note toggle */
+  .composer-tabs{display:flex;gap:6px;padding:8px 20px 0;background:var(--panel);flex-shrink:0}
+  .composer-tab{font-size:12px;font-weight:600;padding:6px 14px;border-radius:8px 8px 0 0;border:1px solid var(--line);border-bottom:0;background:var(--panel2);color:var(--muted);cursor:pointer}
+  .composer-tab[data-mode="reply"].active{background:var(--panel);color:var(--teal);box-shadow:inset 0 -2px 0 var(--teal)}
+  .composer-tab[data-mode="note"].active{background:var(--panel);color:#fbbf24;box-shadow:inset 0 -2px 0 #fbbf24}
+  /* mode catatan internal — warna amber, tegaskan tidak terkirim ke customer */
+  .reply-box.note-mode{background:rgba(251,191,36,.05)}
+  .reply-box.note-mode textarea{border-color:rgba(251,191,36,.5)}
+  .reply-box.note-mode textarea:focus{border-color:#fbbf24}
+  .reply-box.note-mode #sendBtn{background:#fbbf24;color:#3b2f0a}
   /* macro quick-reply */
   .macro-wrap{position:relative;flex-shrink:0}
   .reply-box .macro-btn{background:var(--panel2);border:1px solid var(--line);color:var(--teal);padding:0;width:42px;height:40px;border-radius:10px;font-size:17px;font-weight:400}
@@ -240,6 +256,11 @@
       <span class="dot open"></span>
       <span class="name">Open</span>
       <span class="count" id="cOpen">0</span>
+    </button>
+    <button class="bucket-btn" data-bucket="konfirmasi_web">
+      <span class="dot konfirmasi_web"></span>
+      <span class="name">Konfirmasi web only</span>
+      <span class="count" id="cKonfWeb">0</span>
     </button>
     <button class="bucket-btn" data-bucket="in_progress">
       <span class="dot in_progress"></span>
@@ -345,6 +366,10 @@
         </div>
       </div>
 
+      <div class="composer-tabs" id="composerTabs">
+        <button class="composer-tab active" data-mode="reply">💬 Balas</button>
+        <button class="composer-tab" data-mode="note">📝 Private Note</button>
+      </div>
       <div class="reply-box" id="replyBox">
         <div class="macro-wrap">
           <button id="macroBtn" class="macro-btn" title="Sisipkan template macro">⚡</button>
@@ -389,6 +414,9 @@ let currentPhone = null;
 let currentHasInbound = false; // apakah thread aktif punya pesan MASUK ASLI dari customer (WA)
 let currentHasWebConfirm = false; // customer konfirmasi via halaman web (bukan chat WA)
 let currentBucket = 'after_blast';
+let composerMode = 'reply';       // 'reply' = kirim ke customer via WA; 'note' = catatan internal
+let currentReplyLocked = false;   // thread terminal (done/invalid) → reply dikunci (note tetap boleh)
+let currentReplyPlaceholder = 'Tulis balasan...';
 const WEB_CONFIRM_PREFIX = '[Konfirmasi Validasi via Web]';
 let currentOutlet = '', currentInvoice = '', currentKode = ''; // data thread aktif utk isi macro
 let currentTeam = '';
@@ -431,7 +459,7 @@ function renderMsgBody(m) {
 function showApiErr(msg) { $('#apiErrBanner').textContent = msg; $('#apiErrBanner').style.display = 'block'; }
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 2500); }
 
-const bucketLabels = { after_blast:'After Blast', inbound_non_blast:'Inbound non Blast', outside_blast:'Di luar Blast', open:'Open', in_progress:'In Progress', on_going:'On Going', scheduled:'Scheduled', force_close:'Force Close', done:'Done', invalid:'Invalid' };
+const bucketLabels = { after_blast:'After Blast', inbound_non_blast:'Inbound non Blast', outside_blast:'Di luar Blast', open:'Open', konfirmasi_web:'Konfirmasi web only', in_progress:'In Progress', on_going:'On Going', scheduled:'Scheduled', force_close:'Force Close', done:'Done', invalid:'Invalid' };
 
 async function loadMe() {
   try {
@@ -471,6 +499,7 @@ async function loadThreads() {
     $('#cNonBlast').textContent = r.counts.inbound_non_blast || 0;
     $('#cOutside').textContent = r.counts.outside_blast || 0;
     $('#cOpen').textContent = r.counts.open || 0;
+    $('#cKonfWeb').textContent = r.counts.konfirmasi_web || 0;
     $('#cProg').textContent = r.counts.in_progress || 0;
     $('#cOnGoing').textContent = r.counts.on_going || 0;
     $('#cScheduled').textContent = r.counts.scheduled || 0;
@@ -538,6 +567,7 @@ async function selectThread(phone) {
   currentPhone = phone;
   lastMessageID = 0;
   pendingDone = false;
+  composerMode = 'reply';   // tiap thread mulai di mode Balas
   $('#sendBtn').textContent = 'Kirim';
   $$('#threadList .thread-item').forEach(d => d.classList.remove('selected'));
   $('#chatEmpty').style.display = 'none';
@@ -573,7 +603,7 @@ async function loadMessages(scrollBottom) {
     }
 
     // Action buttons & reply lock. done/invalid = terminal (terkunci, bisa Reopen).
-    const replyBox = $('#replyBox');
+    // Lock/placeholder final di-set via refreshComposer() (hormati mode Balas/Note).
     const terminal = (r.status === 'done' || r.status === 'invalid');
     const ongoing = (r.status === 'on_going');
     const scheduled = (r.status === 'scheduled');
@@ -585,8 +615,8 @@ async function loadMessages(scrollBottom) {
       $('#actScheduled').style.display = 'none';
       $('#actForceClose').style.display = 'none';
       $('#actReopen').style.display = '';
-      replyBox.classList.add('locked');
-      $('#replyText').placeholder = (r.status === 'invalid')
+      currentReplyLocked = true;
+      currentReplyPlaceholder = (r.status === 'invalid')
         ? 'Thread ditandai Invalid. Reopen untuk aktifkan lagi.'
         : 'Thread sudah Done. Reopen untuk aktifkan lagi.';
     } else {
@@ -598,10 +628,14 @@ async function loadMessages(scrollBottom) {
       // Force Close manual: tampil di status aktif, sembunyi kalau sudah force_close
       $('#actForceClose').style.display = (r.status === 'force_close') ? 'none' : '';
       $('#actReopen').style.display = parked ? '' : 'none';
-      replyBox.classList.remove('locked');
-      $('#replyText').placeholder = scheduled ? 'Dijadwalkan validasi lain hari. Tulis balasan...'
-        : (ongoing ? 'Sedang divalidasi (On Going). Tulis balasan...' : 'Tulis balasan...');
+      currentReplyLocked = false;
+      currentReplyPlaceholder = scheduled ? 'Dijadwalkan validasi lain hari. Tulis balasan...'
+        : (ongoing ? 'Sedang divalidasi (On Going). Tulis balasan...'
+        : (r.status === 'konfirmasi_web' ? 'Konfirmasi via web — Inti mungkin tak bisa balas (kontak dingin/463). Coba WA Call/blast resmi.'
+        : 'Tulis balasan...'));
     }
+    // Terapkan lock + placeholder + gaya sesuai mode composer aktif (Balas / Private Note).
+    refreshComposer();
 
     // Indikator invoice + attempt terakhir. Tampil untuk SEMUA thread yang punya invoice
     // (bukan cuma thread non-blast yang dicocokkan). Attempt = kiriman blast tertinggi.
@@ -657,6 +691,13 @@ async function loadMessages(scrollBottom) {
       const div = document.createElement('div');
       div.className = 'msg ' + m.direction;
       const timeStr = d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+      // Private note (catatan internal) — bukan pesan customer, tampil terpisah.
+      if (m.direction === 'note') {
+        const who = m.sender_name ? esc(m.sender_name) : (m.sender_email ? esc(m.sender_email) : 'Team');
+        div.innerHTML = `<div class="note-label">📝 Catatan internal</div>${esc(m.body)}<div class="meta">${who} · ${timeStr}</div>`;
+        list.appendChild(div);
+        return;
+      }
       const sender = m.direction === 'out' && m.sender_name ? esc(m.sender_name) : (m.direction === 'in' ? 'User' : 'Blast');
       const attTag = m.attempt ? `<span class="att-chip">Attempt ${m.attempt}</span>` : '';
       div.innerHTML = attTag + renderMsgBody(m) + `<div class="meta">${sender} · ${timeStr}</div>`;
@@ -927,6 +968,7 @@ $('#replyText').addEventListener('input', e => {
 });
 
 async function sendReply() {
+  if (composerMode === 'note') return sendNote();
   const text = $('#replyText').value.trim();
   if (!text || !currentPhone) return;
   const closing = pendingDone;            // tutup thread setelah kirim?
@@ -951,6 +993,52 @@ async function sendReply() {
     $('#sendBtn').textContent = pendingDone ? 'Kirim & Tutup' : 'Kirim';
   }
 }
+
+// Private Note — simpan catatan internal (tidak dikirim ke customer). Boleh saat terkunci.
+async function sendNote() {
+  const text = $('#replyText').value.trim();
+  if (!text || !currentPhone) return;
+  $('#sendBtn').disabled = true;
+  const prev = $('#sendBtn').textContent;
+  $('#sendBtn').textContent = '...';
+  const fd = new FormData();
+  fd.append('body', text);
+  try {
+    const r = await apiFetch(`/api/inbox/note?phone=${encodeURIComponent(currentPhone)}`, { method: 'POST', body: fd });
+    if (!r.ok) { alert('Gagal simpan catatan: ' + await r.text()); return; }
+    $('#replyText').value = ''; $('#replyText').style.height = 'auto';
+    toast('📝 Catatan internal tersimpan (tidak dikirim ke customer).');
+    await loadMessages(true);
+  } finally {
+    $('#sendBtn').disabled = false;
+    $('#sendBtn').textContent = prev;
+  }
+}
+
+// refreshComposer — sinkronkan tampilan kotak tulis dengan mode aktif (Balas / Private Note)
+// dan status kunci thread. Mode Balas terkunci saat thread terminal; mode Note SELALU aktif.
+function refreshComposer() {
+  const replyBox = $('#replyBox');
+  $$('.composer-tab').forEach(t => t.classList.toggle('active', t.dataset.mode === composerMode));
+  if (composerMode === 'note') {
+    replyBox.classList.remove('locked');
+    replyBox.classList.add('note-mode');
+    $('#replyText').placeholder = 'Catatan internal untuk tim (tidak dikirim ke customer)...';
+    $('#sendBtn').textContent = 'Simpan Catatan';
+  } else {
+    replyBox.classList.remove('note-mode');
+    replyBox.classList.toggle('locked', currentReplyLocked);
+    $('#replyText').placeholder = currentReplyPlaceholder;
+    $('#sendBtn').textContent = pendingDone ? 'Kirim & Tutup' : 'Kirim';
+  }
+}
+
+// Toggle Reply / Private Note
+$$('.composer-tab').forEach(t => t.addEventListener('click', () => {
+  composerMode = t.dataset.mode;
+  refreshComposer();
+  $('#replyText').focus();
+}));
 
 // Bucket tabs
 $$('.bucket-btn').forEach(b => b.addEventListener('click', () => {

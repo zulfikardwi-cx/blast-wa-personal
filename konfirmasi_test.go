@@ -4,6 +4,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func seedTokenRow(t *testing.T, token, phone, invoice, outlet string) {
@@ -23,7 +24,7 @@ func postKonfirmasi(kode string) *httptest.ResponseRecorder {
 	return rec
 }
 
-func TestKonfirmasi_ValidCodeMovesThreadToOpen(t *testing.T) {
+func TestKonfirmasi_ValidCodeMovesThreadToKonfirmasiWeb(t *testing.T) {
 	setupBlastHistoryDB(t)
 	seedTokenRow(t, "HWYTSJJU", "6285702526099", "INV/NEW/202606/01226", "Drip n Dine")
 	// thread awal after_blast (sudah di-blast, belum respons)
@@ -36,10 +37,11 @@ func TestKonfirmasi_ValidCodeMovesThreadToOpen(t *testing.T) {
 	if !strings.Contains(body, `"ok":true`) || !strings.Contains(body, "Drip n Dine") {
 		t.Fatalf("konfirmasi gagal: %s", body)
 	}
+	// Konfirmasi via WEB → bucket 'konfirmasi_web' (BUKAN 'open'): customer belum chat WA.
 	var status string
 	auditDB.QueryRow(`SELECT status FROM chat_threads WHERE phone='6285702526099'`).Scan(&status)
-	if status != "open" {
-		t.Errorf("status = %q, want open", status)
+	if status != "konfirmasi_web" {
+		t.Errorf("status = %q, want konfirmasi_web", status)
 	}
 	var nMsg int
 	auditDB.QueryRow(`SELECT COUNT(*) FROM chat_messages WHERE phone='6285702526099' AND direction='in' AND body LIKE '[Konfirmasi Validasi via Web]%'`).Scan(&nMsg)
@@ -68,14 +70,38 @@ func TestKonfirmasi_ByInvoiceNumber(t *testing.T) {
 	}
 	var status string
 	auditDB.QueryRow(`SELECT status FROM chat_threads WHERE phone='6285702526099'`).Scan(&status)
-	if status != "open" {
-		t.Errorf("status = %q, want open", status)
+	if status != "konfirmasi_web" {
+		t.Errorf("status = %q, want konfirmasi_web", status)
 	}
 	// Penanda tetap pakai TOKEN (bukan nomor invoice mentah).
 	var n int
 	auditDB.QueryRow(`SELECT COUNT(*) FROM chat_messages WHERE phone='6285702526099' AND body LIKE '%Kode HWYTSJJU%'`).Scan(&n)
 	if n != 1 {
 		t.Errorf("penanda harus memuat token HWYTSJJU, n=%d", n)
+	}
+}
+
+// Setelah konfirmasi web (bucket konfirmasi_web), kalau customer BENAR-BENAR chat WA ke
+// Inti (upsertThreadIncoming), thread dipromosikan ke 'open' — sudah reachable.
+func TestKonfirmasi_RealWAReplyPromotesToOpen(t *testing.T) {
+	setupBlastHistoryDB(t)
+	seedTokenRow(t, "HWYTSJJU", "6285702526099", "INV/NEW/202606/01226", "Drip n Dine")
+	if _, err := auditDB.Exec(`INSERT INTO chat_threads (phone,status) VALUES ('6285702526099','after_blast')`); err != nil {
+		t.Fatal(err)
+	}
+	_ = postKonfirmasi("HWYTSJJU")
+	var status string
+	auditDB.QueryRow(`SELECT status FROM chat_threads WHERE phone='6285702526099'`).Scan(&status)
+	if status != "konfirmasi_web" {
+		t.Fatalf("setelah konfirmasi web status=%q, want konfirmasi_web", status)
+	}
+	// Customer lalu chat WA asli → promote ke open.
+	if err := upsertThreadIncoming("6285702526099", "Halo kak siap divalidasi", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	auditDB.QueryRow(`SELECT status FROM chat_threads WHERE phone='6285702526099'`).Scan(&status)
+	if status != "open" {
+		t.Errorf("setelah chat WA asli status=%q, want open", status)
 	}
 }
 

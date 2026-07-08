@@ -146,9 +146,10 @@ func konfirmasiCore(w http.ResponseWriter, r *http.Request, linkTarget string) {
 		if err := recordChatMessage(phone, "in", body, "", "", now, 0, "", ""); err != nil {
 			fmt.Println("warn: konfirmasi recordChatMessage:", err)
 		}
-		// Pindah thread ke 'open' (kecuali terminal) — sama seperti balasan WA masuk.
-		if err := upsertThreadIncoming(phone, body, now); err != nil {
-			fmt.Println("warn: konfirmasi upsertThreadIncoming:", err)
+		// Pindah thread ke bucket 'konfirmasi_web' (kecuali terminal / sudah reachable via WA).
+		// BUKAN 'open': customer belum chat WA ke Inti, jadi Inti tak bisa balas (kontak dingin).
+		if err := upsertThreadKonfirmasiWeb(phone, body, now); err != nil {
+			fmt.Println("warn: konfirmasi upsertThreadKonfirmasiWeb:", err)
 		}
 	}
 

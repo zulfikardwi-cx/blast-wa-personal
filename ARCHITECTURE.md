@@ -115,7 +115,8 @@ Alur bisnis singkat:
 | Status | Arti | PIC (assigned) |
 |---|---|---|
 | `after_blast` | Attempt 1 terkirim, belum ada respons. Masuk antrian auto-retry. | — |
-| `open` | Pelanggan membalas (ada incoming). Perlu ditangani. | dilepas (netral) |
+| `open` | Pelanggan membalas via **WA asli** (ada incoming). Perlu ditangani. Inti bisa balas. | dilepas (netral) |
+| `konfirmasi_web` | Pelanggan konfirmasi lewat **halaman web only** (belum pernah chat WA ke Inti). Inti **tak bisa** kirim balasan (kontak dingin → error 463); tindak lanjut via WA Call / blast resmi. Kalau customer akhirnya chat WA asli → promote ke `open`. | dilepas (netral) |
 | `in_progress` | Agent sudah membalas via inbox. | agent yang balas |
 | `on_going` | Ditandai sedang divalidasi (WhatsApp Call dst). Keluar dari antrian retry. | agent yang klik |
 | `scheduled` | Pelanggan minta validasi di hari lain (`followup_at`). Keluar dari retry. | agent yang klik |
@@ -152,6 +153,8 @@ Alur bisnis singkat:
 - Incoming WA → `upsertThreadIncoming` (status→`open` kecuali terkunci) + `recordChatMessage`.
 - `GET /api/inbox/threads?status=&team=` (daftar + counts per bucket), `GET /api/inbox/messages?phone=`.
 - Balas: `POST /api/inbox/reply` → `sendOne` + `upsertThreadAgentReply` (→`in_progress`).
+- **Private Note**: `POST /api/inbox/note` → simpan `chat_messages` `direction='note'` (catatan internal antar-tim: "sudah dihubungi" dst). TIDAK kirim WA, TIDAK ubah status/bucket/unread. Frontend inbox punya toggle **Balas / Private Note** di kotak tulis; note boleh ditulis walau thread terkunci.
+- **Konfirmasi web**: `POST /api/konfirmasi` (publik) → `upsertThreadKonfirmasiWeb` (→bucket `konfirmasi_web`, bukan `open`). Migrasi `migrateWebOnlyToKonfirmasiWeb` (startup) reklasifikasi thread `open` lama yang web-only.
 - Set status: `POST /api/inbox/status` (open/in_progress/done/invalid/on_going/force_close/scheduled).
 
 ### 7.4 Done / Resolve
@@ -176,7 +179,7 @@ Alur bisnis singkat:
 **Sheets:** `/api/{sheet-status,export-sheet}`
 **Retry:** `/api/retry/{preview,run-now,exclude,include,excluded}`
 **Report:** `/api/report/{unresponsive,unresponsive.csv,export-sheet,resolved,resolved.csv,resolved/export-sheet}`
-**Inbox:** `/api/inbox/{threads,messages,read,status,reply,resolve,sync-teams,media}`
+**Inbox:** `/api/inbox/{threads,messages,read,status,reply,note,resolve,sync-teams,media}` (`note` = private note internal, tidak kirim WA)
 **Blaster:** `/api/blaster/{wa-status,qr,wa-logout}` (koneksi nomor disposable pengirim blast; `wa-logout` = ganti nomor). Blast/retry (`/api/blast`, `/api/retry/*`) kini cek koneksi & kirim via BLASTER, bukan INTI.
 **Zopoz:** `/api/zopoz/*` (mirror: wa-status,qr,wa-logout,templates,blast,progress,history,sheet-status,export-sheet,retry/*,report/*,threads,messages,read,status,reply,media)
 **Static:** `/` → `docs/`

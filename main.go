@@ -196,6 +196,7 @@ func main() {
 	mux.HandleFunc("/api/inbox/invoices", corsMiddleware(requireAuth(handleThreadInvoices)))
 	mux.HandleFunc("/api/inbox/match-token", corsMiddleware(requireAuth(handleMatchToken)))
 	mux.HandleFunc("/api/inbox/reply", corsMiddleware(requireAuth(handleReply)))
+	mux.HandleFunc("/api/inbox/note", corsMiddleware(requireAuth(handleNote)))
 	mux.HandleFunc("/api/inbox/resolve", corsMiddleware(requireAuth(handleResolve)))
 	mux.HandleFunc("/api/inbox/sync-teams", corsMiddleware(requireAuth(handleSyncTeams)))
 	// Media file — TANPA requireAuth (di-load via <img>/<video> lintas-domain), diproteksi

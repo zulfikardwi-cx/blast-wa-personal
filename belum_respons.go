@@ -117,12 +117,13 @@ func handleBelumResponsExport(w http.ResponseWriter, r *http.Request) {
 // ensureThreadAfterBlast — buat/REAKTIVASI thread ke 'after_blast' saat di-blast Attempt 1,
 // supaya muncul di Inbox bucket After Blast (seperti blast lama). Thread yang sedang DITANGANI
 // (customer sudah balas / validator kerjakan: open/in_progress/on_going/scheduled) TIDAK
-// diganggu. Selain itu (done/force_close/invalid/rejected/baru) di-reaktivasi ke after_blast +
+// diganggu. konfirmasi_web (sudah konfirmasi via web = respons positif) juga TIDAK diganggu.
+// Selain itu (done/force_close/invalid/rejected/baru) di-reaktivasi ke after_blast +
 // current_attempt reset ke 1.
 func ensureThreadAfterBlast(phone, outlet, invoice string, logID int64, preview string, ts time.Time) {
 	tsStr := ts.Format(time.RFC3339)
 	prev := truncate(preview, 80)
-	const keep = `status IN ('open','in_progress','on_going','scheduled')`
+	const keep = `status IN ('open','in_progress','on_going','scheduled','konfirmasi_web')`
 	_, _ = auditDB.Exec(`
 INSERT INTO chat_threads (phone, nama_outlet, nomer_invoice, last_blast_id, last_message_at, last_message_preview, last_message_direction, status, unread_count, current_attempt, last_attempt_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?, 'out', 'after_blast', 0, 1, ?, ?)

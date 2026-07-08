@@ -85,6 +85,22 @@ func TestBelumRespons_StatsFromBlastHistory(t *testing.T) {
 	}
 }
 
+// konfirmasi_web = customer sudah konfirmasi via web (respons positif) → keluar antrian
+// Attempt 2/3, tidak boleh ikut dihitung sebagai kandidat retry.
+func TestBelumRespons_KonfirmasiWebExcludedFromRetry(t *testing.T) {
+	setupBlastHistoryDB(t)
+	seedBlasted(t, "6281", "INV-A", 1, "after_blast")    // eligible attempt 2
+	seedBlasted(t, "6290", "INV-W", 1, "konfirmasi_web") // sudah konfirmasi web → TIDAK eligible
+
+	rec := httptest.NewRecorder()
+	handleBelumResponsStats(rec, httptest.NewRequest("GET", "/api/belum-respons", nil))
+	body := rec.Body.String()
+	// Hanya 6281 yang jadi kandidat; konfirmasi_web tidak ikut → total 1, attempt2 1.
+	if !strings.Contains(body, `"attempt2":1`) || !strings.Contains(body, `"total":1`) {
+		t.Errorf("konfirmasi_web harus dikecualikan dari retry: %s", body)
+	}
+}
+
 func TestBelumRespons_ExportRecordsToRiwayat(t *testing.T) {
 	setupBlastHistoryDB(t)
 	seedBlasted(t, "6281", "INV-A", 1, "after_blast") // eligible attempt 2

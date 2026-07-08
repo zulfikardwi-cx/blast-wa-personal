@@ -7,8 +7,10 @@ package main
 //
 // Model: attempt tiap invoice direkonstruksi dari log blast (MAX attempt yang 'sent').
 // Sebuah invoice eligible retry kalau:
-//   - nomornya BELUM terminal: status NOT IN (done, invalid, on_going, scheduled, force_close)
-//     → after_blast / open / in_progress / rejected tetap jalan (termasuk yang sudah membalas).
+//   - nomornya BELUM terminal: status NOT IN (done, invalid, on_going, scheduled,
+//     force_close, konfirmasi_web) → after_blast / open / in_progress / rejected tetap jalan
+//     (termasuk yang sudah membalas). konfirmasi_web = sudah konfirmasi via web (respons
+//     positif) → keluar antrian, JANGAN di-blast "belum konfirmasi" lagi.
 //   - Attempt 1 invoice itu BERHASIL terkirim (max_att >= 1) dan belum mentok (max_att < 3).
 //   - Belum dikirimi attempt hari ini (maks 1 attempt/hari per invoice).
 
@@ -29,7 +31,7 @@ SELECT r.phone, COALESCE(r.nomer_invoice,''), COALESCE(MAX(r.nama_outlet),''),
 FROM ` + recvTbl + ` r
 JOIN ` + logsTbl + ` b ON r.blast_log_id = b.id
 JOIN ` + threadsTbl + ` t ON t.phone = r.phone
-WHERE t.status NOT IN ('done','invalid','on_going','scheduled','force_close')
+WHERE t.status NOT IN ('done','invalid','on_going','scheduled','force_close','konfirmasi_web')
   AND COALESCE(r.nomer_invoice,'') != ''
   AND NOT EXISTS (SELECT 1 FROM excluded_invoices x WHERE x.suite=? AND x.phone=r.phone AND x.nomer_invoice=r.nomer_invoice)
   AND NOT EXISTS (SELECT 1 FROM resolved_invoices rv WHERE rv.suite=? AND rv.phone=r.phone AND rv.nomer_invoice=r.nomer_invoice)
@@ -75,7 +77,7 @@ func invoiceStillNeedsRetry(suite, threadsTbl, recvTbl, logsTbl, phone, invoice 
 		return 0, false
 	}
 	switch status {
-	case "done", "invalid", "on_going", "scheduled", "force_close":
+	case "done", "invalid", "on_going", "scheduled", "force_close", "konfirmasi_web":
 		return 0, false
 	}
 	var maxAtt int

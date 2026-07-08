@@ -109,6 +109,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_wa_id ON chat_messages(wa_message
 	}
 	fixupBackfillRetryLogs()
 	migrateRejectedAttempt3ToForceClose()
+	migrateWebOnlyToKonfirmasiWeb()
 	return nil
 }
 
@@ -125,6 +126,31 @@ func migrateRejectedAttempt3ToForceClose() {
 	}
 	if n, _ := res.RowsAffected(); n > 0 {
 		fmt.Printf("migrasi: %d thread rejected (Attempt 3) → force_close\n", n)
+	}
+}
+
+// migrateWebOnlyToKonfirmasiWeb — reklasifikasi thread lama yang masuk 'open' HANYA karena
+// konfirmasi via web (belum ada balasan WA asli) ke bucket baru 'konfirmasi_web'. Dulu
+// konfirmasiCore memakai upsertThreadIncoming (→'open'); sekarang dipisah. Idempoten:
+// hanya menyentuh thread 'open' yang punya penanda web-konfirmasi TANPA inbound WA asli.
+func migrateWebOnlyToKonfirmasiWeb() {
+	res, err := auditDB.Exec(`
+UPDATE chat_threads SET status='konfirmasi_web', updated_at=datetime('now')
+WHERE status='open'
+  AND EXISTS (
+    SELECT 1 FROM chat_messages m
+    WHERE m.phone=chat_threads.phone AND m.direction='in'
+      AND m.body LIKE '[Konfirmasi Validasi via Web]%')
+  AND NOT EXISTS (
+    SELECT 1 FROM chat_messages m
+    WHERE m.phone=chat_threads.phone AND m.direction='in'
+      AND (m.body IS NULL OR m.body NOT LIKE '[Konfirmasi Validasi via Web]%'))`)
+	if err != nil {
+		fmt.Println("warn: migrateWebOnlyToKonfirmasiWeb:", err)
+		return
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		fmt.Printf("migrasi: %d thread web-only (open) → konfirmasi_web\n", n)
 	}
 }
 
@@ -486,6 +512,30 @@ WHERE phone = ?`, tsStr, prev, tsStr, phone)
 	return err
 }
 
+// upsertThreadKonfirmasiWeb — dipanggil saat customer konfirmasi lewat HALAMAN WEB
+// (bukan balasan WA asli). Beda dari upsertThreadIncoming: thread masuk bucket
+// 'konfirmasi_web', BUKAN 'open'. Alasannya: customer belum pernah chat WA ke Inti,
+// jadi Inti TIDAK bisa mengirim pesan balik (kontak dingin → error 463). Bucket
+// terpisah menandai "web only" ke validator supaya ditindaklanjuti via jalur lain
+// (WA Call / blast resmi). Kalau customer NANTI benar-benar chat WA ke Inti,
+// upsertThreadIncoming mempromosikannya ke 'open' (sudah reachable).
+func upsertThreadKonfirmasiWeb(phone, preview string, ts time.Time) error {
+	tsStr := ts.Format(time.RFC3339)
+	prev := truncate(preview, 80)
+	_, err := auditDB.Exec(`
+UPDATE chat_threads SET
+	last_message_at = ?,
+	last_message_preview = ?,
+	last_message_direction = 'in',
+	unread_count = unread_count + 1,
+	-- Terminal (done/invalid/on_going/scheduled) & thread yang SUDAH reachable via WA
+	-- (open/in_progress) tidak diturunkan ke konfirmasi_web.
+	status = CASE WHEN status IN ('done','invalid','on_going','scheduled','open','in_progress') THEN status ELSE 'konfirmasi_web' END,
+	updated_at = ?
+WHERE phone = ?`, tsStr, prev, tsStr, phone)
+	return err
+}
+
 // setThreadReplyJID — simpan nomor pengirim asli (wa_jid) saat pelanggan chat ke INTI dari
 // nomor BEDA dari yang di-blast. Balasan agent dikirim ke sini (lihat replyTargetPhone).
 func setThreadReplyJID(phone, waJID string) error {
@@ -614,9 +664,10 @@ func handleThreads(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// summary counts
-	var cAfter, cOpen, cProg, cOnGoing, cForce, cDone, cInvalid, cScheduled, cUnread, cNonBlast, cOutside int
+	var cAfter, cOpen, cProg, cOnGoing, cForce, cDone, cInvalid, cScheduled, cUnread, cNonBlast, cOutside, cKonfWeb int
 	_ = auditDB.QueryRow(`SELECT COUNT(*) FROM chat_threads WHERE status = 'inbound_non_blast'`).Scan(&cNonBlast)
 	_ = auditDB.QueryRow(`SELECT COUNT(*) FROM chat_threads WHERE status = 'outside_blast'`).Scan(&cOutside)
+	_ = auditDB.QueryRow(`SELECT COUNT(*) FROM chat_threads WHERE status = 'konfirmasi_web'`).Scan(&cKonfWeb)
 	_ = auditDB.QueryRow(`SELECT COUNT(*) FROM chat_threads WHERE status = 'after_blast'`).Scan(&cAfter)
 	_ = auditDB.QueryRow(`SELECT COUNT(*) FROM chat_threads WHERE status = 'open'`).Scan(&cOpen)
 	_ = auditDB.QueryRow(`SELECT COUNT(*) FROM chat_threads WHERE status = 'in_progress'`).Scan(&cProg)
@@ -636,6 +687,7 @@ func handleThreads(w http.ResponseWriter, r *http.Request) {
 	totals["scheduled"] = cScheduled
 	totals["inbound_non_blast"] = cNonBlast
 	totals["outside_blast"] = cOutside
+	totals["konfirmasi_web"] = cKonfWeb
 	totals["unread"] = cUnread
 
 	// daftar team (distinct) untuk dropdown filter — lintas semua bucket biar stabil
@@ -1016,6 +1068,46 @@ func handleReply(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, map[string]any{"ok": true, "id": res.ID})
+}
+
+// handleNote — POST /api/inbox/note?phone=. Simpan CATATAN INTERNAL (private note) di
+// timeline thread. TIDAK dikirim ke customer via WA, TIDAK mengubah status/bucket, TIDAK
+// menambah unread. Hanya penanda antar-tim (mis. "sudah dihubungi via telp", "menunggu
+// balasan"). Disimpan sebagai chat_messages direction='note' + siapa yang menulis.
+// Boleh dipakai kapan saja, termasuk saat thread terkunci (done/invalid).
+func handleNote(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", 405)
+		return
+	}
+	phone := r.URL.Query().Get("phone")
+	if phone == "" {
+		httpErr(w, 400, "phone required")
+		return
+	}
+	if err := r.ParseMultipartForm(2 << 20); err != nil {
+		if err := r.ParseForm(); err != nil {
+			httpErr(w, 400, "form: %v", err)
+			return
+		}
+	}
+	body := strings.TrimSpace(r.FormValue("body"))
+	if body == "" {
+		httpErr(w, 400, "body kosong")
+		return
+	}
+	user, _ := userFromCtx(r.Context())
+	now := time.Now()
+	// direction='note' → bukan 'in'/'out'; tidak ikut dihitung inbound/outbound. waMsgID ""
+	// → NULL, jadi tak bentrok unique index & tiap catatan tersimpan terpisah.
+	if e := recordChatMessage(phone, "note", body, "", "", now, 0, user.Email, user.Name); e != nil {
+		httpErr(w, 500, "simpan catatan: %v", e)
+		return
+	}
+	// Catatan internal tidak mengubah bucket/last_message/unread — hanya bump updated_at.
+	// (last_message_at TIDAK diubah supaya urutan thread by pesan customer tetap.)
+	_, _ = auditDB.Exec(`UPDATE chat_threads SET updated_at=? WHERE phone=?`, now.Format(time.RFC3339), phone)
+	writeJSON(w, map[string]any{"ok": true})
 }
 
 // handleResolve — set status=done + kirim closing message.
