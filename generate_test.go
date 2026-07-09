@@ -244,6 +244,64 @@ func TestRetry_CycleAwareAfterReset(t *testing.T) {
 	}
 }
 
+// Skenario Done + invoice baru: nomor yang SEMUA invoice-nya sudah Done (bucket done,
+// tercatat di resolved_invoices) lalu di-blast Attempt 1 untuk invoice BARU → nomor pindah
+// ke after_blast, TAPI invoice lama tetap Done (tak bocor ke Belum Respons); hanya invoice
+// baru yang masuk antrian. Ini invariant inti: Belum Respons = per-invoice via resolved_invoices.
+func TestDone_NewInvoiceReblastKeepsOldDoneExcluded(t *testing.T) {
+	setupTokenDB(t)
+	phone := "628555000111"
+	invOld, invNew := "INV/OLD/001", "INV/NEW/002"
+
+	// Invoice lama: Attempt 1 sent (hari lampau), sudah Done (resolved), thread status done.
+	res, _ := auditDB.Exec(`INSERT INTO blast_logs (started_at,template,attempt,total,sent) VALUES ('2026-07-01T09:00:00+07:00','tpl',1,1,1)`)
+	id, _ := res.LastInsertId()
+	auditDB.Exec(`INSERT INTO blast_recipients (blast_log_id,phone,nama_outlet,nomer_invoice,status,sent_at,attempt,cycle) VALUES (?,?,?,?, 'sent','2026-07-01T09:00:00+07:00',1,1)`, id, phone, "Outlet X", invOld)
+	if _, e := auditDB.Exec(`INSERT INTO resolved_invoices (suite,phone,nomer_invoice) VALUES ('majoo',?,?)`, phone, invOld); e != nil {
+		t.Fatalf("seed resolved: %v", e)
+	}
+	auditDB.Exec(`INSERT INTO chat_threads (phone,nama_outlet,nomer_invoice,status,current_attempt) VALUES (?,?,?, 'done',1)`, phone, "Outlet X", invOld)
+
+	// Blast invoice BARU untuk nomor yang sama (invoice belum pernah → Attempt 1).
+	genCSV(t, phone, "Outlet X", invNew, false)
+
+	// (1) Nomor pindah ke after_blast.
+	var st string
+	auditDB.QueryRow(`SELECT status FROM chat_threads WHERE phone=?`, phone).Scan(&st)
+	if st != "after_blast" {
+		t.Fatalf("thread status = %q, want after_blast", st)
+	}
+
+	// (2) Belum Respons: invoice baru MUNCUL, invoice lama (Done) TIDAK bocor.
+	rows, err := queryUnresponsive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seenOld, seenNew bool
+	for _, rr := range rows {
+		if rr.Phone != phone {
+			continue
+		}
+		if rr.NomerInvoice == invOld {
+			seenOld = true
+		}
+		if rr.NomerInvoice == invNew {
+			seenNew = true
+		}
+	}
+	if seenOld {
+		t.Errorf("invoice lama yang sudah Done BOCOR ke Belum Respons")
+	}
+	if !seenNew {
+		t.Errorf("invoice baru tidak muncul di Belum Respons")
+	}
+
+	// (3) Antrian retry juga mengecualikan invoice lama, mengizinkan invoice baru.
+	if _, ok := invoiceStillNeedsRetry("majoo", "chat_threads", "blast_recipients", "blast_logs", phone, invOld, startOfTodayWIB()); ok {
+		t.Errorf("invoice lama (Done) masih dianggap perlu retry")
+	}
+}
+
 func TestGenerateLinks_MissingRequiredHeader(t *testing.T) {
 	setupTokenDB(t)
 	body, ctype := multipartCSV(t, "phone,outlet_salah,invoice_salah\n0813,X,INV1\n")
