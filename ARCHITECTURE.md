@@ -126,7 +126,7 @@ Alur bisnis singkat:
 | `rejected` | Attempt 1 GAGAL kirim karena **nomor tidak terdaftar di WA** (`attempt1_failed=1`). Untuk tim WO. | — |
 
 **Aturan penting:**
-- **Terminal untuk retry** (keluar antrian Attempt 2/3): `done, invalid, on_going, scheduled, force_close`. Sisanya (`after_blast, open, in_progress, rejected`) TETAP diretry selama invoice-nya belum sampai Attempt 3 & Attempt 1-nya sukses.
+- **Terminal untuk retry** (keluar antrian Attempt 2/3): `done, invalid, on_going, scheduled, force_close, konfirmasi_web, open`. Sisanya (`after_blast, in_progress, rejected`) TETAP diretry selama invoice-nya belum sampai Attempt 3 & Attempt 1-nya sukses. **`open`** = customer sudah membalas via WA → keluar antrian (ditangani manual; juga sudah tak masuk report Belum Respons). **`in_progress`** = agent sudah balas → sengaja tetap dikejar sampai Done/Attempt 3.
 - **Assign PIC** (di `handleSetStatus`): `in_progress/on_going/scheduled/done` → assign ke user yang klik. `open/invalid/force_close` → clear (netral). **Re-open melepas PIC**; PIC lain yang set `on_going` menggantikan.
 - **Done** = jalur sebenarnya lewat `sendReply` → `POST /api/inbox/status` `status=done` (BUKAN `/api/inbox/resolve` yang kini legacy). Saat Done: assign resolver + `markPhoneResolved()` snapshot semua invoice nomor itu ke `resolved_invoices`.
 - **Reject hanya untuk nomor tidak terdaftar.** Gagal kirim karena koneksi putus / error 463 / rate-limit / server → **tidak** ditandai rejected (nomor valid), biar bisa di-blast ulang. (`isInvalidNumberErr` di blast.go; `backfillFailedThreads` juga hanya backfill error "tidak terdaftar".)

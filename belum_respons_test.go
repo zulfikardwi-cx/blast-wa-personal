@@ -102,6 +102,23 @@ func TestBelumRespons_KonfirmasiWebExcludedFromRetry(t *testing.T) {
 	}
 }
 
+// open = customer sudah membalas via WA (respons masuk) → keluar antrian Attempt 2/3,
+// ditangani manual. in_progress (agent sudah balas) TETAP dikejar.
+func TestBelumRespons_OpenExcludedFromRetry(t *testing.T) {
+	setupBlastHistoryDB(t)
+	seedBlasted(t, "6281", "INV-A", 1, "after_blast")  // eligible attempt 2
+	seedBlasted(t, "6291", "INV-O", 1, "open")         // sudah membalas → TIDAK eligible
+	seedBlasted(t, "6292", "INV-P", 1, "in_progress")  // agent handle → TETAP eligible
+
+	rec := httptest.NewRecorder()
+	handleBelumResponsStats(rec, httptest.NewRequest("GET", "/api/belum-respons", nil))
+	body := rec.Body.String()
+	// after_blast + in_progress eligible (2), open dikecualikan.
+	if !strings.Contains(body, `"attempt2":2`) || !strings.Contains(body, `"total":2`) {
+		t.Errorf("'open' harus keluar dari antrian, in_progress tetap: %s", body)
+	}
+}
+
 func TestBelumRespons_ExportRecordsToRiwayat(t *testing.T) {
 	setupBlastHistoryDB(t)
 	seedBlasted(t, "6281", "INV-A", 1, "after_blast") // eligible attempt 2
