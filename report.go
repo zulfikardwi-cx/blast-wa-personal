@@ -75,6 +75,12 @@ WHERE t.status IN ('after_blast', 'in_progress', 'rejected', 'force_close')
   -- Kolom Attempt 1/2/3 hanya dari CYCLE (putaran) TERKINI. Data lama semua cycle=1 → no-op;
   -- setelah reset re-blast, report menampilkan progres putaran baru (Attempt 1 lagi), bukan lama.
   AND r.cycle = (SELECT MAX(cycle) FROM blast_recipients r2 WHERE r2.phone=r.phone AND COALESCE(r2.nomer_invoice,'')=COALESCE(r.nomer_invoice,''))
+  -- Revisi nomor (sales ganti nomor): 1 invoice bisa di-blast ke beberapa nomor. Hanya nomor
+  -- TERKINI (yang Attempt 1-nya paling baru) yang mewakili invoice; nomor lama di-supersede.
+  -- Invoice 1 nomor (mayoritas) → subquery = nomor itu sendiri → no-op.
+  AND r.phone = (SELECT r3.phone FROM blast_recipients r3 JOIN blast_logs b3 ON r3.blast_log_id=b3.id
+                 WHERE COALESCE(r3.nomer_invoice,'')=COALESCE(r.nomer_invoice,'') AND COALESCE(r3.attempt,b3.attempt)=1
+                 ORDER BY COALESCE(r3.sent_at, r3.created_at) DESC, r3.id DESC LIMIT 1)
   AND NOT EXISTS (SELECT 1 FROM excluded_invoices x WHERE x.suite='majoo' AND x.phone=r.phone AND x.nomer_invoice=r.nomer_invoice)
   AND NOT EXISTS (SELECT 1 FROM resolved_invoices rv WHERE rv.suite='majoo' AND rv.phone=r.phone AND rv.nomer_invoice=r.nomer_invoice)
 GROUP BY r.phone, r.nomer_invoice

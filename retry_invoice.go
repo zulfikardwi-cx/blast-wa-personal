@@ -38,6 +38,10 @@ WHERE t.status NOT IN ('done','invalid','on_going','scheduled','force_close','ko
   -- Hanya hitung baris di CYCLE (putaran) TERKINI invoice. Data lama semua cycle=1 → no-op;
   -- setelah reset re-blast, attempt dihitung ulang dari cycle baru (Attempt 1-2-3 lagi).
   AND r.cycle = (SELECT MAX(cycle) FROM ` + recvTbl + ` r2 WHERE r2.phone=r.phone AND COALESCE(r2.nomer_invoice,'')=COALESCE(r.nomer_invoice,''))
+  -- Revisi nomor: hanya nomor TERKINI (Attempt 1 paling baru) yg dikejar; nomor lama supersede.
+  AND r.phone = (SELECT r3.phone FROM ` + recvTbl + ` r3 JOIN ` + logsTbl + ` b3 ON r3.blast_log_id=b3.id
+                 WHERE COALESCE(r3.nomer_invoice,'')=COALESCE(r.nomer_invoice,'') AND COALESCE(r3.attempt,b3.attempt)=1
+                 ORDER BY COALESCE(r3.sent_at, r3.created_at) DESC, r3.id DESC LIMIT 1)
   AND NOT EXISTS (SELECT 1 FROM excluded_invoices x WHERE x.suite=? AND x.phone=r.phone AND x.nomer_invoice=r.nomer_invoice)
   AND NOT EXISTS (SELECT 1 FROM resolved_invoices rv WHERE rv.suite=? AND rv.phone=r.phone AND rv.nomer_invoice=r.nomer_invoice)
 GROUP BY r.phone, r.nomer_invoice
@@ -83,6 +87,15 @@ func invoiceStillNeedsRetry(suite, threadsTbl, recvTbl, logsTbl, phone, invoice 
 	}
 	switch status {
 	case "done", "invalid", "on_going", "scheduled", "force_close", "konfirmasi_web", "open":
+		return 0, false
+	}
+	// Revisi nomor: kalau invoice ini sudah di-blast ke nomor LEBIH BARU, nomor ini di-supersede
+	// (bukan nomor terkini) → jangan dikejar lagi.
+	var curPhone string
+	_ = auditDB.QueryRow(`SELECT r3.phone FROM `+recvTbl+` r3 JOIN `+logsTbl+` b3 ON r3.blast_log_id=b3.id
+		WHERE COALESCE(r3.nomer_invoice,'')=? AND COALESCE(r3.attempt,b3.attempt)=1
+		ORDER BY COALESCE(r3.sent_at, r3.created_at) DESC, r3.id DESC LIMIT 1`, invoice).Scan(&curPhone)
+	if curPhone != "" && curPhone != phone {
 		return 0, false
 	}
 	var maxAtt int

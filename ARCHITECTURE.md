@@ -162,7 +162,8 @@ Alur bisnis singkat:
 - `handleSetStatus` status=done: assign resolver + `markPhoneResolved("majoo", ...)` → snapshot SEMUA invoice attempt-1-sent nomor itu ke `resolved_invoices`.
 
 ### 7.5 Report (`report.go`)
-- **Belum Respons** (`queryUnresponsive`): per (phone,invoice) untuk thread `after_blast/in_progress/rejected/force_close`, kolom Attempt 1/2/3 + Rejected + Alasan. Exclude `excluded_invoices` & `resolved_invoices`. Tab Sheet "Belum Respons".
+- **Belum Respons** (`queryUnresponsive`): per (phone,invoice) untuk thread `after_blast/in_progress/rejected/force_close`, kolom Attempt 1/2/3 + Rejected + Alasan. Exclude `excluded_invoices` & `resolved_invoices`, filter **cycle terkini** & **nomor terkini**. Tab Sheet "Belum Respons".
+  - **Revisi nomor (supersede):** 1 invoice bisa di-blast ke banyak nomor (sales ganti nomor). Report & antrian retry hanya menghitung **nomor TERKINI** = nomor yang Attempt 1-nya paling baru untuk invoice itu (`ORDER BY sent_at DESC LIMIT 1`). Nomor lama otomatis keluar dari Belum Respons & retry. Invoice 1-nomor (mayoritas) → subquery = nomor itu sendiri → no-op. Diterapkan di `queryUnresponsive`, `collectInvoiceRetries`, `invoiceStillNeedsRetry`.
 - **Report Resolved** (`queryResolved`): dari `resolved_invoices` (permanen). Kolom: Nomor Invoice | Nama Outlet | Nomor User | Nama PIC (Resolved). Satu nomor banyak invoice → banyak baris. Tab Sheet "report resolved".
 - **Blast Log** (`sheets.go`): dump lengkap `blast_recipients`+`blast_logs`. Tab "Blast Log".
 - Export via `POST /api/*/export-sheet` (clear + overwrite tab). CSV via `*.csv`.

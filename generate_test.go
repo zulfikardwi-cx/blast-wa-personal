@@ -302,6 +302,59 @@ func TestDone_NewInvoiceReblastKeepsOldDoneExcluded(t *testing.T) {
 	}
 }
 
+// Revisi nomor (sales ganti nomor): invoice yang sama di-blast ke nomor BARU. Hanya nomor
+// TERKINI (Attempt 1 paling baru) yang muncul di Belum Respons & antrian retry; nomor lama
+// di-supersede — walau nomor lama masih after_blast/belum respons.
+func TestReport_PhoneRevisionSupersedesOldPhone(t *testing.T) {
+	setupTokenDB(t)
+	inv := "INV/REV/001"
+	phoneOld, phoneNew := "628111000", "628999000"
+
+	// Nomor lama: Attempt 1 (hari lampau), thread after_blast (belum respons).
+	res, _ := auditDB.Exec(`INSERT INTO blast_logs (started_at,template,attempt,total,sent) VALUES ('2026-07-01T09:00:00+07:00','tpl',1,1,1)`)
+	id, _ := res.LastInsertId()
+	auditDB.Exec(`INSERT INTO blast_recipients (blast_log_id,phone,nomer_invoice,status,sent_at,attempt,cycle) VALUES (?,?,?, 'sent','2026-07-01T09:00:00+07:00',1,1)`, id, phoneOld, inv)
+	auditDB.Exec(`INSERT INTO chat_threads (phone,nomer_invoice,status,current_attempt) VALUES (?,?, 'after_blast',1)`, phoneOld, inv)
+
+	// Nomor baru (revisi): Attempt 1 lebih baru, thread after_blast.
+	res, _ = auditDB.Exec(`INSERT INTO blast_logs (started_at,template,attempt,total,sent) VALUES ('2026-07-06T09:00:00+07:00','tpl',1,1,1)`)
+	id, _ = res.LastInsertId()
+	auditDB.Exec(`INSERT INTO blast_recipients (blast_log_id,phone,nomer_invoice,status,sent_at,attempt,cycle) VALUES (?,?,?, 'sent','2026-07-06T09:00:00+07:00',1,1)`, id, phoneNew, inv)
+	auditDB.Exec(`INSERT INTO chat_threads (phone,nomer_invoice,status,current_attempt) VALUES (?,?, 'after_blast',1)`, phoneNew, inv)
+
+	// Belum Respons: HANYA nomor baru muncul, nomor lama di-supersede.
+	rows, err := queryUnresponsive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seenOld, seenNew bool
+	for _, rr := range rows {
+		if rr.NomerInvoice != inv {
+			continue
+		}
+		if rr.Phone == phoneOld {
+			seenOld = true
+		}
+		if rr.Phone == phoneNew {
+			seenNew = true
+		}
+	}
+	if seenOld {
+		t.Errorf("nomor lama (revisi) masih muncul di Belum Respons")
+	}
+	if !seenNew {
+		t.Errorf("nomor baru tidak muncul di Belum Respons")
+	}
+
+	// Retry: nomor lama di-supersede (tidak eligible), nomor baru eligible Attempt 2.
+	if _, ok := invoiceStillNeedsRetry("majoo", "chat_threads", "blast_recipients", "blast_logs", phoneOld, inv, startOfTodayWIB()); ok {
+		t.Errorf("nomor lama (di-supersede) masih dianggap perlu retry")
+	}
+	if next, ok := invoiceStillNeedsRetry("majoo", "chat_threads", "blast_recipients", "blast_logs", phoneNew, inv, startOfTodayWIB()); !ok || next != 2 {
+		t.Errorf("nomor baru harusnya eligible Attempt 2, dapat (%d,%v)", next, ok)
+	}
+}
+
 func TestGenerateLinks_MissingRequiredHeader(t *testing.T) {
 	setupTokenDB(t)
 	body, ctype := multipartCSV(t, "phone,outlet_salah,invoice_salah\n0813,X,INV1\n")
