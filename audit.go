@@ -125,15 +125,35 @@ func recordBlastStart(j *BlastJob) (int64, error) {
 	return res.LastInsertId()
 }
 
+// invoiceCycleHasSent — true kalau (phone,invoice) SUDAH punya baris 'sent' di cycle tsb.
+// Dipakai deteksi re-blast: kalau putaran terkini sudah pernah terkirim, Attempt 1 baru =
+// buka putaran (cycle) baru.
+func invoiceCycleHasSent(phone, invoice string, cycle int) bool {
+	var c int
+	_ = auditDB.QueryRow(`SELECT COUNT(*) FROM blast_recipients
+		WHERE phone=? AND COALESCE(nomer_invoice,'')=COALESCE(?,'') AND cycle=? AND status='sent'`, phone, invoice, cycle).Scan(&c)
+	return c > 0
+}
+
 // recordRecipient — insert satu baris recipient detail. Dipanggil setelah tiap send selesai.
+//
+// Re-blast (Attempt 1 sukses) ke invoice yang PUTARAN terkininya SUDAH punya kiriman — mis.
+// nomor yang sudah Done / selesai satu putaran Attempt 1-2-3 lalu di-blast ulang — membuka
+// PUTARAN (cycle) baru + melepas invoice dari resolved_invoices. Efeknya: thread balik ke
+// after_blast (via upsertThreadBlast) DAN proses Attempt 1-2-3 mengulang dari awal (antrian
+// retry menghitung attempt dari cycle terkini). Blast pertama sebuah invoice (cycle terkini
+// belum punya 'sent') tetap cycle 1 seperti biasa — tidak ada perubahan perilaku.
 func recordRecipient(blastLogID int64, rec *RecipientStatus) error {
 	if blastLogID == 0 {
 		return nil
 	}
-	// Ikut cycle terkini invoice (min 1) — blast live biasanya cycle 1 (invoice baru).
 	c := currentInvoiceCycle(rec.Phone, rec.NomerInv)
 	if c < 1 {
 		c = 1
+	}
+	if rec.Status == "sent" && rec.NomerInv != "" && invoiceCycleHasSent(rec.Phone, rec.NomerInv, c) {
+		c++ // buka putaran baru → Attempt 1-2-3 mulai dari awal
+		unresolveInvoice("majoo", rec.Phone, rec.NomerInv)
 	}
 	_, err := auditDB.Exec(
 		`INSERT INTO blast_recipients (blast_log_id, phone, nama_outlet, nomer_invoice, status, error, message, sent_at, cycle) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,

@@ -73,6 +73,15 @@ func unresolvePhone(suite, phone string) {
 	}
 }
 
+// unresolveInvoice — lepas SATU invoice (per phone) dari resolved_invoices. Dipakai saat
+// invoice yang sudah Done DI-BLAST ULANG (Attempt 1 baru): invoice keluar dari status
+// resolved supaya thread balik ke after_blast & proses Attempt 1-2-3 mengulang dari awal.
+func unresolveInvoice(suite, phone, invoice string) {
+	if _, err := auditDB.Exec(`DELETE FROM resolved_invoices WHERE suite=? AND phone=? AND nomer_invoice=?`, suite, phone, invoice); err != nil {
+		fmt.Println("warn: unresolveInvoice:", err)
+	}
+}
+
 // invoiceStatus — 1 invoice yang pernah ter-blast (attempt-1 terkirim) ke sebuah nomor,
 // beserta status resolved-nya. Dipakai picker "pilih invoice mana yang di-Done".
 type invoiceStatus struct {

@@ -131,6 +131,8 @@
   .chat-header button.sched-btn:hover{background:rgba(34,211,238,.12)}
   .chat-header button.forceclose-btn{color:#94a3b8;border-color:rgba(100,116,139,.5)}
   .chat-header button.forceclose-btn:hover{background:rgba(100,116,139,.15)}
+  .chat-header button.clm-btn{color:#fbbf24;border-color:rgba(251,191,36,.5)}
+  .chat-header button.clm-btn:hover{background:rgba(251,191,36,.12)}
   .h-followup{font-size:12px;color:#22d3ee;font-weight:600;margin-top:2px}
   .thread-item .followup{color:#22d3ee;font-size:11px;font-weight:600;margin-top:4px}
   /* modal jadwal follow-up */
@@ -224,6 +226,7 @@
   <a href="index.html">📤 Blast</a>
   <a href="generate.html">🔗 Generate Kode &amp; Link</a>
   <a href="inbox.html" class="active">📥 Inbox <span id="navUnread" style="background:var(--lime);color:#0b1220;padding:1px 6px;border-radius:8px;margin-left:4px;font-size:10px;display:none"></span></a>
+  <a href="inbox-clm.html">🎯 Inbox CLM</a>
   <a href="upsell.html">🛍️ Upsell</a>
 </div>
 
@@ -346,6 +349,7 @@
           <div class="h-followup" id="hFollowup" style="display:none"></div>
         </div>
         <div class="actions">
+          <button class="clm-btn" id="actAssignCLM" title="Assign percakapan ini ke Inbox CLM untuk re-follow up (tidak menghapus dari Inbox)">🎯 Assign to CLM</button>
           <button class="reopen-btn" id="actReopen" style="display:none">↺ Reopen</button>
           <button class="ongoing-btn" id="actOnGoing">⏳ On Going</button>
           <button class="sched-btn" id="actScheduled">📅 Scheduled</button>
@@ -391,6 +395,18 @@
     <div class="modal-actions">
       <button class="cancel" id="schedCancel">Batal</button>
       <button class="save" id="schedSave">Simpan</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="clmModal" style="display:none">
+  <div class="modal" style="width:440px">
+    <h3>🎯 Assign invoice ke Inbox CLM</h3>
+    <p>Nomor ini punya beberapa invoice. Centang invoice yang mau di-assign ke Inbox CLM — tiap invoice jadi assignment terpisah (percakapan sendiri). Yang tidak dicentang tidak ikut ter-assign.</p>
+    <div id="clmInvList" class="inv-list"></div>
+    <div class="modal-actions">
+      <button class="cancel" id="clmCancel">Batal</button>
+      <button class="save" id="clmConfirm" style="background:#fbbf24;color:#3b2f0a">Assign ke CLM</button>
     </div>
   </div>
 </div>
@@ -795,6 +811,66 @@ $('#actOnGoing').addEventListener('click', async () => {
   } finally {
     $('#actOnGoing').disabled = false;
   }
+});
+
+// Assign to CLM — kirim invoice terpilih ke Inbox CLM (per invoice). Kalau nomor punya >1
+// invoice → buka picker dulu. TIDAK mengubah status/bucket Inbox — thread tetap di Inbox.
+async function postAssignCLM(invoices) {
+  const fd = new FormData();
+  (invoices || []).forEach(inv => fd.append('invoices', inv));
+  const r = await apiFetch(`/api/clm/assign?phone=${encodeURIComponent(currentPhone)}`, { method: 'POST', body: fd });
+  if (!r.ok) { alert('Gagal: ' + await r.text()); return; }
+  const d = await r.json().catch(() => ({}));
+  $('#clmModal').style.display = 'none';
+  toast(`🎯 ${d.assigned || 0} invoice di-assign ke Inbox CLM.`);
+}
+
+$('#actAssignCLM').addEventListener('click', async () => {
+  if (!currentPhone) return;
+  $('#actAssignCLM').disabled = true;
+  try {
+    let list = [], assigned = [];
+    try {
+      const [jr, ja] = await Promise.all([
+        apiFetch(`/api/inbox/invoices?phone=${encodeURIComponent(currentPhone)}`),
+        apiFetch(`/api/clm/assigned?phone=${encodeURIComponent(currentPhone)}`),
+      ]);
+      if (jr.ok) list = (await jr.json()).invoices || [];
+      if (ja.ok) assigned = (await ja.json()).invoices || [];
+    } catch (_) {}
+    const inCLM = new Set(assigned); // invoice yang sudah di CLM & masih aktif
+
+    // 0–1 invoice → assign langsung (atau tolak kalau sudah di CLM).
+    if (list.length <= 1) {
+      const inv = list.length ? list[0].nomer_invoice : '';
+      if (inCLM.has(inv)) { toast('Invoice ini sudah ada di Inbox CLM.'); return; }
+      await postAssignCLM(list.map(x => x.nomer_invoice));
+      return;
+    }
+    // >1 invoice → picker. Invoice yang sudah di CLM → disabled (tak bisa di-assign dobel).
+    $('#clmInvList').innerHTML = list.map(x => {
+      const done = inCLM.has(x.nomer_invoice);
+      return `
+      <div class="inv-row ${done ? 'resolved' : ''}">
+        <label>
+          <input type="checkbox" value="${esc(x.nomer_invoice)}" ${done ? 'disabled' : ''} data-clm-inv>
+          <span class="inv-no">${esc(x.nomer_invoice)}</span>
+          ${done ? '<span class="inv-tag" style="background:rgba(251,191,36,.18);color:#fbbf24">di CLM</span>'
+                 : (x.resolved ? '<span class="inv-tag">sudah Done</span>' : '')}
+        </label>
+      </div>`;
+    }).join('');
+    $('#clmModal').style.display = 'flex';
+  } finally { $('#actAssignCLM').disabled = false; }
+});
+
+$('#clmCancel').addEventListener('click', () => { $('#clmModal').style.display = 'none'; });
+$('#clmModal').addEventListener('click', (e) => { if (e.target.id === 'clmModal') $('#clmModal').style.display = 'none'; });
+$('#clmConfirm').addEventListener('click', async () => {
+  const picked = [...document.querySelectorAll('#clmInvList input[data-clm-inv]:checked')].map(c => c.value);
+  if (picked.length === 0) { alert('Centang minimal 1 invoice untuk di-assign.'); return; }
+  $('#clmConfirm').disabled = true;
+  try { await postAssignCLM(picked); } finally { $('#clmConfirm').disabled = false; }
 });
 
 // Scheduled — customer minta validasi di hari lain. Tidak kirim pesan. Keluar dari antrian

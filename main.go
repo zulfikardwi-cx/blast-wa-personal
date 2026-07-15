@@ -56,6 +56,10 @@ func main() {
 	if err := initChat(); err != nil {
 		log.Fatalf("chat: %v", err)
 	}
+	// Inbox CLM — layer assignment manual di atas Inbox (tabel clm_assignments).
+	if err := initCLM(); err != nil {
+		log.Fatalf("clm: %v", err)
+	}
 	// Zopoz (line WA kedua) — tabel terpisah di auditDB. Non-fatal kalau gagal.
 	if err := initZopozChat(); err != nil {
 		log.Fatalf("zopoz chat: %v", err)
@@ -199,6 +203,15 @@ func main() {
 	mux.HandleFunc("/api/inbox/note", corsMiddleware(requireAuth(handleNote)))
 	mux.HandleFunc("/api/inbox/resolve", corsMiddleware(requireAuth(handleResolve)))
 	mux.HandleFunc("/api/inbox/sync-teams", corsMiddleware(requireAuth(handleSyncTeams)))
+
+	// Inbox CLM (independen dari Inbox; per-invoice, timeline & reply sendiri)
+	mux.HandleFunc("/api/clm/threads", corsMiddleware(requireAuth(clmHandleThreads)))
+	mux.HandleFunc("/api/clm/assigned", corsMiddleware(requireAuth(clmHandleAssigned)))
+	mux.HandleFunc("/api/clm/assign", corsMiddleware(requireAuth(clmHandleAssign)))
+	mux.HandleFunc("/api/clm/status", corsMiddleware(requireAuth(clmHandleSetStatus)))
+	mux.HandleFunc("/api/clm/messages", corsMiddleware(requireAuth(clmHandleMessages)))
+	mux.HandleFunc("/api/clm/reply", corsMiddleware(requireAuth(clmHandleReply)))
+	mux.HandleFunc("/api/clm/note", corsMiddleware(requireAuth(clmHandleNote)))
 	// Media file — TANPA requireAuth (di-load via <img>/<video> lintas-domain), diproteksi
 	// token HMAC di query string (?id=&t=). Lihat media.go.
 	mux.HandleFunc("/api/inbox/media", handleInboxMedia)
@@ -421,6 +434,7 @@ func handleIncomingWA(e *events.Message) {
 		if err := upsertThreadInboundNonBlast(senderPhone, body, e.Info.Timestamp); err != nil {
 			log.Println("warn: upsertThreadInboundNonBlast:", err)
 		}
+		clmOnIncoming(senderPhone, body, e.Info.Timestamp, e.Info.ID) // additif — no-op kalau nomor belum di-assign CLM
 		if isDownloadableMedia(mediaType) {
 			go downloadAndStoreMedia(e.Info.ID, eff, mediaType)
 		}
@@ -456,6 +470,7 @@ func handleIncomingWA(e *events.Message) {
 	if err := upsertThreadIncoming(phone, body, e.Info.Timestamp); err != nil {
 		log.Println("warn: upsertThreadIncoming:", err)
 	}
+	clmOnIncoming(phone, body, e.Info.Timestamp, e.Info.ID) // additif — customer balas → CLM 'open' (no-op kalau belum di-assign)
 	// Pelanggan chat dari nomor BEDA dari yang di-blast (dikaitkan via token) → simpan JID
 	// pengirim asli supaya balasan agent terkirim ke nomor itu, bukan nomor yang di-blast.
 	if senderPhone != "" && senderPhone != phone {

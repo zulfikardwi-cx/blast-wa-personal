@@ -1,0 +1,495 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Inbox CLM — Blast WA Personal</title>
+<script src="config.js"></script>
+<style>
+  :root {
+    --bg:#0b1220; --panel:#121a2b; --panel2:#0f1626; --line:#223;
+    --text:#e6ecff; --muted:#8b97b8;
+    --teal:#2DBDB6; --lime:#9ACF87; --teal-soft:rgba(45,189,182,.15);
+    --warn:#f59e0b; --danger:#ef4444; --blue:#3b82f6;
+    --bubble-in:#1f2937; --bubble-out:rgba(45,189,182,.2);
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:flex;flex-direction:column;overflow:hidden}
+
+  header{padding:12px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;background:var(--panel);flex-shrink:0}
+  header .logo{height:24px;width:auto}
+  header .sep{width:1px;height:20px;background:var(--line)}
+  header .brand{display:inline-flex;align-items:center;text-decoration:none;transition:opacity .12s}
+  header .brand:hover{opacity:.8}
+  header .brand .zlogo{height:15px;width:auto;display:block}
+  header .brand-majoo:not(.active) .logo{filter:grayscale(1) opacity(.5)}
+  .subnav{padding:8px 24px;border-bottom:1px solid var(--line);background:var(--panel2);display:flex;gap:8px;align-items:center;flex-shrink:0}
+  .subnav a{font-size:12px;color:var(--muted);text-decoration:none;padding:4px 10px;border-radius:6px;border:1px solid var(--line)}
+  .subnav a:hover{color:var(--teal);border-color:var(--teal)}
+  .subnav a.active{color:var(--teal);border-color:var(--teal);background:var(--teal-soft)}
+  .user{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+  .user img{width:24px;height:24px;border-radius:50%;border:1px solid var(--line)}
+  .status-pill{font-size:11px;padding:3px 9px;border-radius:999px;background:#1f2937;color:var(--muted)}
+  .status-pill.ok{background:rgba(45,189,182,.2);color:var(--teal)}
+  .status-pill.warn{background:#78350f;color:#fde68a}
+
+  main{flex:1;display:flex;overflow:hidden}
+
+  .col-bucket{width:230px;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;flex-shrink:0;padding:16px 12px}
+  .col-bucket .acc-card{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:16px}
+  .col-bucket .acc-card .title{font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px}
+  .col-bucket .acc-card .icon-circle{width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,#fbbf24,var(--lime));display:flex;align-items:center;justify-content:center;color:#0b1220;font-weight:700;font-size:14px}
+  .col-bucket .acc-card .sub{font-size:11px;color:var(--muted);margin-top:2px}
+  .col-bucket .label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin:8px 0 6px;padding-left:8px}
+  .bucket-btn{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;cursor:pointer;border:0;background:transparent;color:var(--text);font-size:13px;text-align:left;width:100%;margin-bottom:2px;transition:background .12s}
+  .bucket-btn:hover{background:var(--panel2)}
+  .bucket-btn.active{background:var(--panel2);border:1px solid var(--line)}
+  .bucket-btn .dot{width:8px;height:8px;border-radius:50%}
+  .bucket-btn .name{flex:1;font-weight:500}
+  .bucket-btn .count{font-size:11px;background:var(--line);color:var(--muted);padding:2px 8px;border-radius:10px;min-width:24px;text-align:center}
+  .bucket-btn.active .count{background:var(--teal);color:#0b1220;font-weight:600}
+  .dot.new{background:var(--blue)}
+  .dot.open{background:var(--lime)}
+  .dot.progress{background:var(--warn)}
+  .dot.done{background:var(--muted)}
+
+  .user-card{margin-top:auto;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px;font-size:11px;color:var(--muted)}
+  .user-card b{color:var(--text);display:block;font-size:12px;font-weight:600}
+  .user-card a.signout{color:var(--teal);font-size:11px;text-decoration:none;float:right}
+
+  .col-list{width:360px;background:var(--panel2);border-right:1px solid var(--line);display:flex;flex-direction:column;flex-shrink:0}
+  .list-header{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px}
+  .list-header h2{margin:0;font-size:15px;font-weight:600}
+  .list-header .badge{background:var(--line);color:var(--muted);padding:1px 8px;border-radius:10px;font-size:11px;font-weight:500}
+  .list-header .badge.hl{background:var(--teal);color:#0b1220}
+  .list-header .sort{margin-left:auto;font-size:11px;color:var(--muted)}
+  .search-box{padding:10px 14px;border-bottom:1px solid var(--line)}
+  .search-box input{width:100%;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 12px;font-size:12px}
+  .search-box input:focus{outline:none;border-color:var(--teal)}
+  .thread-list{flex:1;overflow-y:auto}
+  .thread-item{padding:14px 18px;border-bottom:1px solid var(--line);cursor:pointer;display:flex;gap:12px;position:relative;transition:background .12s}
+  .thread-item:hover{background:var(--panel)}
+  .thread-item.selected{background:var(--panel);box-shadow:inset 3px 0 0 var(--teal)}
+  .thread-item .avatar{width:36px;height:36px;border-radius:50%;background:var(--line);display:flex;align-items:center;justify-content:center;color:var(--text);font-weight:600;font-size:13px;flex-shrink:0}
+  .thread-item .body{flex:1;min-width:0}
+  .thread-item .top{display:flex;align-items:center;gap:8px;margin-bottom:2px}
+  .thread-item .name{font-weight:600;font-size:13px;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .thread-item .time{font-size:10px;color:var(--muted);flex-shrink:0}
+  .thread-item .invoice{color:#f472b6;font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .thread-item .phone{color:var(--muted);font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;margin-bottom:4px}
+  .thread-item .preview{color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .thread-item .status-tag{display:inline-block;font-size:9px;padding:1px 7px;border-radius:8px;text-transform:uppercase;letter-spacing:.4px;margin-top:6px;font-weight:600}
+  .status-tag.new{background:rgba(59,130,246,.2);color:var(--blue)}
+  .status-tag.open{background:rgba(154,207,135,.2);color:var(--lime)}
+  .status-tag.progress{background:rgba(245,158,11,.2);color:var(--warn)}
+  .status-tag.done{background:rgba(139,151,184,.2);color:var(--muted)}
+  .empty{padding:60px 20px;text-align:center;color:var(--muted);font-size:13px}
+
+  .col-chat{flex:1;display:flex;flex-direction:column;background:var(--bg);overflow:hidden;min-width:0}
+  .chat-header{padding:14px 24px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;background:var(--panel);flex-shrink:0}
+  .chat-header .avatar{width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#fbbf24,var(--lime));display:flex;align-items:center;justify-content:center;color:#0b1220;font-weight:600}
+  .chat-header .info{flex:1;min-width:0}
+  .chat-header .h-name{font-weight:600;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .chat-header .h-invoice{color:#f472b6;font-size:12px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;margin-top:1px}
+  .chat-header .h-phone{color:var(--muted);font-size:12px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .chat-header .actions{display:flex;gap:8px;flex-shrink:0}
+  .chat-header button{font-size:12px;padding:8px 14px;border-radius:8px;cursor:pointer;border:1px solid var(--line);background:transparent;color:var(--text);font-weight:500;transition:all .12s}
+  .chat-header button.done-btn{background:var(--lime);color:#0b1220;border-color:var(--lime);font-weight:600}
+  .chat-header button.done-btn:hover{filter:brightness(1.1)}
+  .chat-header button.progress-btn{color:var(--warn);border-color:rgba(245,158,11,.5)}
+  .chat-header button.progress-btn:hover{background:rgba(245,158,11,.12)}
+  .chat-header button.reopen-btn{border-color:var(--blue);color:var(--blue)}
+  .chat-header button.reopen-btn:hover{background:var(--blue);color:#fff}
+  .chat-header button:hover:not(.done-btn):not(.reopen-btn){background:var(--panel2)}
+
+  .messages{flex:1;overflow-y:auto;padding:24px;display:flex;flex-direction:column;gap:6px;background-image:radial-gradient(circle at 1px 1px,rgba(255,255,255,.02) 1px,transparent 0);background-size:20px 20px}
+  .day-sep{text-align:center;color:var(--muted);font-size:11px;margin:16px 0 8px;text-transform:uppercase;letter-spacing:1px}
+  .msg{max-width:55%;padding:8px 12px;border-radius:10px;word-wrap:break-word;line-height:1.4;font-size:13px;white-space:pre-wrap}
+  .msg .meta{font-size:10px;color:var(--muted);margin-top:4px;display:flex;gap:6px}
+  .msg.in{background:var(--bubble-in);align-self:flex-start;border-bottom-left-radius:2px}
+  .msg.out{background:var(--bubble-out);align-self:flex-end;border-bottom-right-radius:2px}
+  .msg.note{background:rgba(251,191,36,.1);border:1px dashed rgba(251,191,36,.55);align-self:center;max-width:78%;color:#fde68a}
+  .msg.note .note-label{font-size:10px;font-weight:700;color:#fbbf24;text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px;display:flex;align-items:center;gap:5px}
+  .msg.note .meta{color:#d1a94a}
+
+  .composer-tabs{display:flex;gap:6px;padding:8px 20px 0;background:var(--panel);flex-shrink:0}
+  .composer-tab{font-size:12px;font-weight:600;padding:6px 14px;border-radius:8px 8px 0 0;border:1px solid var(--line);border-bottom:0;background:var(--panel2);color:var(--muted);cursor:pointer}
+  .composer-tab[data-mode="reply"].active{background:var(--panel);color:var(--teal);box-shadow:inset 0 -2px 0 var(--teal)}
+  .composer-tab[data-mode="note"].active{background:var(--panel);color:#fbbf24;box-shadow:inset 0 -2px 0 #fbbf24}
+  .reply-box{padding:14px 20px;border-top:1px solid var(--line);background:var(--panel);flex-shrink:0;display:flex;gap:10px;align-items:flex-end}
+  .reply-box textarea{flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:10px;padding:10px 14px;font:13px/1.4 inherit;resize:none;min-height:40px;max-height:120px}
+  .reply-box textarea:focus{outline:none;border-color:var(--teal)}
+  .reply-box button{background:var(--teal);color:#0b1220;border:0;padding:10px 22px;border-radius:10px;cursor:pointer;font-weight:600;height:40px}
+  .reply-box button:disabled{opacity:.5;cursor:not-allowed}
+  .reply-box.note-mode{background:rgba(251,191,36,.05)}
+  .reply-box.note-mode textarea{border-color:rgba(251,191,36,.5)}
+  .reply-box.note-mode textarea:focus{border-color:#fbbf24}
+  .reply-box.note-mode #sendBtn{background:#fbbf24;color:#3b2f0a}
+
+  .no-thread{flex:1;display:flex;align-items:center;justify-content:center;color:var(--muted);text-align:center;padding:40px;flex-direction:column;gap:8px}
+  .no-thread .icon{font-size:64px;opacity:.4}
+  .global-err{background:#7f1d1d;color:#fecaca;padding:8px 20px;font-size:12px;text-align:center}
+  .toast{position:fixed;bottom:20px;right:20px;background:var(--panel);border:1px solid var(--lime);color:var(--lime);padding:10px 16px;border-radius:8px;font-size:13px;display:none;z-index:100}
+</style>
+</head>
+<body>
+<div id="apiErrBanner" class="global-err" style="display:none"></div>
+<header>
+  <a href="index.html" class="brand brand-majoo active" title="majoo — Blast / Inbox / Upsell"><img src="assets/majoo-logo.svg" class="logo" alt="majoo" /></a>
+  <div class="sep"></div>
+  <a href="zopoz-blast.html" class="brand brand-zopoz" title="Zopoz — Blast / Inbox / Upsell"><img src="assets/zopoz-logo-muted.svg" class="zlogo" alt="Zopoz" /></a>
+  <span style="flex:1"></span>
+  <span id="connStatus" class="status-pill">checking...</span>
+  <div class="user" id="userBox" style="visibility:hidden">
+    <img id="userAvatar" src="" alt="" />
+    <span id="userName">—</span>
+  </div>
+</header>
+
+<div class="subnav">
+  <a href="index.html">📤 Blast</a>
+  <a href="generate.html">🔗 Generate Kode &amp; Link</a>
+  <a href="inbox.html">📥 Inbox</a>
+  <a href="inbox-clm.html" class="active">🎯 Inbox CLM</a>
+  <a href="upsell.html">🛍️ Upsell</a>
+</div>
+
+<main>
+  <!-- COL 1 — BUCKETS -->
+  <div class="col-bucket">
+    <div class="acc-card">
+      <div class="title">
+        <div class="icon-circle">🎯</div>
+        <div>
+          Inbox CLM<br/>
+          <span class="sub">Per invoice · re-follow up</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="label">Bucket</div>
+    <button class="bucket-btn active" data-bucket="new">
+      <span class="dot new"></span>
+      <span class="name">New Assignment</span>
+      <span class="count" id="cNew">0</span>
+    </button>
+    <button class="bucket-btn" data-bucket="open">
+      <span class="dot open"></span>
+      <span class="name">Open</span>
+      <span class="count" id="cOpen">0</span>
+    </button>
+    <button class="bucket-btn" data-bucket="progress">
+      <span class="dot progress"></span>
+      <span class="name">Progress</span>
+      <span class="count" id="cProgress">0</span>
+    </button>
+    <button class="bucket-btn" data-bucket="done">
+      <span class="dot done"></span>
+      <span class="name">Done</span>
+      <span class="count" id="cDone">0</span>
+    </button>
+
+    <div class="user-card">
+      <div><b id="userCardName">—</b></div>
+      <span id="userCardEmail">—</span>
+      <a href="#" class="signout" id="signoutBtn">Keluar</a>
+      <a href="profil.html" style="clear:both;display:block;color:var(--teal);font-size:11px;text-decoration:none;margin-top:6px">⚙ Ganti password</a>
+    </div>
+  </div>
+
+  <!-- COL 2 — THREAD LIST -->
+  <div class="col-list">
+    <div class="list-header">
+      <h2 id="listTitle">New Assignment</h2>
+      <span class="badge hl" id="listCount">0</span>
+      <span class="sort">↓ Terbaru</span>
+    </div>
+    <div class="search-box">
+      <input type="text" id="searchInput" placeholder="Cari outlet, nomor, atau invoice..." />
+    </div>
+    <div class="thread-list" id="threadList">
+      <div class="empty">Memuat...</div>
+    </div>
+  </div>
+
+  <!-- COL 3 — CHAT DETAIL -->
+  <div class="col-chat">
+    <div id="chatEmpty" class="no-thread">
+      <div class="icon">🎯</div>
+      <div>Pilih assignment di kiri untuk lihat percakapan</div>
+      <div style="font-size:11px">Tiap assignment = 1 invoice. Chat dimulai <b>kosong</b> — percakapan CLM sendiri, bukan riwayat WA Inbox.</div>
+    </div>
+
+    <div id="chatContent" style="display:none;flex-direction:column;flex:1;overflow:hidden">
+      <div class="chat-header">
+        <div class="avatar" id="hAvatar">--</div>
+        <div class="info">
+          <div class="h-name" id="hName">—</div>
+          <div class="h-invoice" id="hInvoice" style="display:none"></div>
+          <div class="h-phone" id="hPhone">—</div>
+        </div>
+        <div class="actions">
+          <button class="reopen-btn" id="actReopen" style="display:none">↺ Reopen</button>
+          <button class="progress-btn" id="actProgress">⏳ Tandai Progress</button>
+          <button class="done-btn" id="actDone">✓ Done</button>
+        </div>
+      </div>
+
+      <div class="messages" id="messages"></div>
+
+      <div class="composer-tabs" id="composerTabs">
+        <button class="composer-tab active" data-mode="reply">💬 Balas</button>
+        <button class="composer-tab" data-mode="note">📝 Private Note</button>
+      </div>
+      <div class="reply-box" id="replyBox">
+        <textarea id="replyText" placeholder="Tulis balasan..." rows="1"></textarea>
+        <button id="sendBtn">Kirim</button>
+      </div>
+    </div>
+  </div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API_BASE = (window.APP_CONFIG && window.APP_CONFIG.API_BASE) || '';
+let me = null;
+let currentId = null;         // assignment id aktif
+let currentBucket = 'new';
+let composerMode = 'reply';
+let lastMessageID = 0;
+let allThreads = [];
+let searchTerm = '';
+
+const $ = s => document.querySelector(s);
+const $$ = s => document.querySelectorAll(s);
+const esc = s => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const initials = name => (name||'').split(/\s+/).slice(0,2).map(w=>w[0]||'').join('').toUpperCase() || '?';
+
+function apiFetch(path, opts = {}) { return fetch(API_BASE + path, { credentials: 'include', ...opts }); }
+function showApiErr(msg) { $('#apiErrBanner').textContent = msg; $('#apiErrBanner').style.display = 'block'; }
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 2500); }
+
+const bucketLabels = { new:'New Assignment', open:'Open', progress:'Progress', done:'Done' };
+
+async function loadMe() {
+  try {
+    const r = await apiFetch('/api/me').then(r => r.json());
+    me = r.user;
+    if (!me) { location.href = 'login.html'; return; }
+    $('#userName').textContent = me.name || me.email;
+    $('#userCardName').textContent = me.name || '(no name)';
+    $('#userCardEmail').textContent = me.email;
+    if (me.picture) $('#userAvatar').src = me.picture;
+    else $('#userAvatar').style.display = 'none';
+    $('#userBox').style.visibility = 'visible';
+  } catch (e) { showApiErr('Tidak bisa konek ke backend'); }
+}
+
+async function pollStatus() {
+  try {
+    const r = await apiFetch('/api/status');
+    if (r.status === 401) { location.href = 'login.html'; return; }
+    const d = await r.json();
+    const pill = $('#connStatus');
+    if (d.loggedIn && d.connected) { pill.textContent = 'WA Connected'; pill.className = 'status-pill ok'; }
+    else { pill.textContent = d.hasQR ? 'Scan QR' : 'Disconnected'; pill.className = 'status-pill warn'; }
+  } catch (e) {}
+}
+
+$$('.bucket-btn').forEach(btn => btn.addEventListener('click', () => {
+  $$('.bucket-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  currentBucket = btn.dataset.bucket;
+  $('#listTitle').textContent = bucketLabels[currentBucket] || currentBucket;
+  loadThreads();
+}));
+
+$('#searchInput').addEventListener('input', e => { searchTerm = e.target.value.trim().toLowerCase(); renderThreads(); });
+
+async function loadThreads() {
+  try {
+    const r = await apiFetch(`/api/clm/threads?status=${encodeURIComponent(currentBucket)}`).then(r => r.json());
+    allThreads = r.threads || [];
+    const c = r.counts || {};
+    $('#cNew').textContent = c.new || 0;
+    $('#cOpen').textContent = c.open || 0;
+    $('#cProgress').textContent = c.progress || 0;
+    $('#cDone').textContent = c.done || 0;
+    renderThreads();
+  } catch (e) { console.error(e); $('#threadList').innerHTML = '<div class="empty">Gagal memuat.</div>'; }
+}
+
+function renderThreads() {
+  const list = $('#threadList');
+  let items = allThreads;
+  if (searchTerm) {
+    items = items.filter(t => (t.nama_outlet||'').toLowerCase().includes(searchTerm)
+      || (t.phone||'').includes(searchTerm)
+      || (t.nomer_invoice||'').toLowerCase().includes(searchTerm));
+  }
+  $('#listCount').textContent = items.length;
+  if (!items.length) { list.innerHTML = '<div class="empty">Belum ada assignment di bucket ini.</div>'; return; }
+  list.innerHTML = '';
+  items.forEach(t => {
+    const div = document.createElement('div');
+    div.className = 'thread-item' + (t.id === currentId ? ' selected' : '');
+    const time = t.last_message_at ? new Date(t.last_message_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : '';
+    const nama = t.nama_outlet || '(no outlet)';
+    const inv = t.nomer_invoice ? `<div class="invoice">🔗 ${esc(t.nomer_invoice)}</div>` : '';
+    const prev = t.last_preview ? esc(t.last_preview) : '<i>belum ada percakapan</i>';
+    div.innerHTML = `
+      <div class="avatar">${esc(initials(nama))}</div>
+      <div class="body">
+        <div class="top"><span class="name">${esc(nama)}</span><span class="time">${time}</span></div>
+        ${inv}
+        <div class="phone">+${esc(t.phone)}</div>
+        <div class="preview">${prev}</div>
+        <span class="status-tag ${t.status}">${bucketLabels[t.status] || t.status}</span>
+      </div>`;
+    div.addEventListener('click', () => selectThread(t.id));
+    list.appendChild(div);
+  });
+}
+
+async function selectThread(id) {
+  currentId = id;
+  lastMessageID = 0;
+  composerMode = 'reply';
+  refreshComposer();
+  $$('#threadList .thread-item').forEach(d => d.classList.remove('selected'));
+  $('#chatEmpty').style.display = 'none';
+  $('#chatContent').style.display = 'flex';
+  await loadMessages(true);
+  renderThreads();
+}
+
+function currentClmStatus() {
+  const t = allThreads.find(x => x.id === currentId);
+  return t ? t.status : 'new';
+}
+
+async function loadMessages(scrollBottom) {
+  if (!currentId) return;
+  try {
+    const r = await apiFetch(`/api/clm/messages?id=${encodeURIComponent(currentId)}`).then(r => r.json());
+    const nama = r.nama_outlet || '(no outlet)';
+    $('#hName').textContent = nama;
+    $('#hAvatar').textContent = initials(nama);
+    $('#hPhone').textContent = '+' + r.phone;
+    if (r.nomer_invoice) { $('#hInvoice').textContent = '🔗 ' + r.nomer_invoice; $('#hInvoice').style.display = ''; }
+    else { $('#hInvoice').style.display = 'none'; }
+
+    const clm = r.status;
+    const isDone = (clm === 'done');
+    $('#actDone').style.display = isDone ? 'none' : '';
+    $('#actProgress').style.display = (isDone || clm === 'progress') ? 'none' : '';
+    $('#actReopen').style.display = isDone ? '' : 'none';
+
+    const msgs = r.messages || [];
+    const newMaxID = msgs.length ? msgs[msgs.length-1].id : 0;
+    if (newMaxID === lastMessageID && $('#messages').children.length > 0 && msgs.length > 0) return;
+    lastMessageID = newMaxID;
+
+    const list = $('#messages');
+    list.innerHTML = '';
+    if (!msgs.length) {
+      list.innerHTML = `<div class="day-sep" style="margin-top:40px">Percakapan baru · belum ada pesan</div>
+        <div style="text-align:center;color:var(--muted);font-size:12px;max-width:60%;align-self:center">
+        Ini timeline CLM khusus invoice ini. Mulai follow-up dengan mengirim balasan di bawah.</div>`;
+      if (scrollBottom) list.scrollTop = list.scrollHeight;
+      return;
+    }
+    let lastDate = '';
+    msgs.forEach(m => {
+      const d = new Date(m.timestamp);
+      const dateStr = d.toLocaleDateString('id-ID', {weekday:'long',day:'numeric',month:'short'});
+      if (dateStr !== lastDate) {
+        const sep = document.createElement('div');
+        sep.className = 'day-sep'; sep.textContent = dateStr; list.appendChild(sep); lastDate = dateStr;
+      }
+      const div = document.createElement('div');
+      const timeStr = d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+      if (m.direction === 'note') {
+        div.className = 'msg note';
+        div.innerHTML = `<div class="note-label">📝 Catatan Internal</div>${esc(m.body)}<div class="meta">${esc(m.sender_name||'')} · ${timeStr}</div>`;
+        list.appendChild(div); return;
+      }
+      div.className = 'msg ' + (m.direction === 'in' ? 'in' : 'out');
+      const sender = m.direction === 'out' && m.sender_name ? esc(m.sender_name) : (m.direction === 'in' ? 'User' : '');
+      div.innerHTML = esc(m.body) + `<div class="meta">${sender} · ${timeStr}</div>`;
+      list.appendChild(div);
+    });
+    if (scrollBottom) list.scrollTop = list.scrollHeight;
+  } catch (e) { console.error(e); }
+}
+
+$$('.composer-tab').forEach(t => t.addEventListener('click', () => { composerMode = t.dataset.mode; refreshComposer(); }));
+function refreshComposer() {
+  $$('.composer-tab').forEach(t => t.classList.toggle('active', t.dataset.mode === composerMode));
+  const box = $('#replyBox');
+  box.classList.toggle('note-mode', composerMode === 'note');
+  $('#replyText').placeholder = composerMode === 'note' ? 'Catatan internal (tidak dikirim ke customer)...' : 'Tulis balasan...';
+  $('#sendBtn').textContent = composerMode === 'note' ? 'Simpan' : 'Kirim';
+}
+
+$('#sendBtn').addEventListener('click', sendReply);
+$('#replyText').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendReply(); } });
+$('#replyText').addEventListener('input', e => { e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px'; });
+
+async function sendReply() {
+  const text = $('#replyText').value.trim();
+  if (!text || !currentId) return;
+  const isNote = composerMode === 'note';
+  $('#sendBtn').disabled = true;
+  const prev = $('#sendBtn').textContent;
+  $('#sendBtn').textContent = '...';
+  const fd = new FormData(); fd.append('body', text);
+  const path = isNote ? '/api/clm/note' : '/api/clm/reply';
+  try {
+    const r = await apiFetch(`${path}?id=${encodeURIComponent(currentId)}`, { method: 'POST', body: fd });
+    if (!r.ok) { alert('Gagal: ' + await r.text()); return; }
+    $('#replyText').value = ''; $('#replyText').style.height = 'auto';
+    if (isNote) toast('📝 Catatan internal tersimpan.');
+    else toast('✅ Terkirim ke customer. Assignment → Progress.');
+    await loadMessages(true);
+    await loadThreads();
+  } finally {
+    $('#sendBtn').disabled = false;
+    $('#sendBtn').textContent = prev;
+  }
+}
+
+async function setClmStatus(status, msg) {
+  if (!currentId) return;
+  const fd = new FormData(); fd.append('status', status);
+  const r = await apiFetch(`/api/clm/status?id=${encodeURIComponent(currentId)}`, { method: 'POST', body: fd });
+  if (!r.ok) { alert('Gagal: ' + await r.text()); return; }
+  toast(msg);
+  await loadThreads();
+  await loadMessages(false);
+}
+
+$('#actDone').addEventListener('click', () => {
+  if (!confirm('Tandai assignment ini sebagai Done (selesai re-follow up)?')) return;
+  setClmStatus('done', '✓ Assignment ditandai Done.');
+});
+$('#actProgress').addEventListener('click', () => setClmStatus('progress', '⏳ Ditandai Progress.'));
+$('#actReopen').addEventListener('click', () => setClmStatus('new', '↺ Assignment dibuka kembali (New Assignment).'));
+
+$('#signoutBtn').addEventListener('click', async (e) => {
+  e.preventDefault();
+  await apiFetch('/auth/logout', { method: 'POST' }).catch(()=>{});
+  location.href = 'login.html';
+});
+
+loadMe();
+pollStatus();
+setInterval(pollStatus, 15000);
+loadThreads();
+refreshComposer();
+setInterval(() => { if (document.visibilityState === 'visible') { loadThreads(); if (currentId) loadMessages(false); } }, 12000);
+</script>
+</body>
+</html>
