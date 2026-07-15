@@ -266,17 +266,17 @@ ON CONFLICT(phone, nomer_invoice) DO UPDATE SET
 	writeJSON(w, map[string]any{"ok": true, "assigned": assigned})
 }
 
-// clmHandleAssigned — GET /api/clm/assigned?phone= . Daftar invoice nomor ini yang SUDAH
-// ter-assign ke CLM & masih AKTIF (status != done). Dipakai picker Assign untuk men-disable
-// invoice yang sudah masuk CLM (tak bisa di-assign dobel). Yang sudah Done di CLM TIDAK ikut
-// (boleh di-assign ulang untuk re-follow up).
+// clmHandleAssigned — GET /api/clm/assigned?phone= . Daftar SEMUA invoice nomor ini yang
+// sudah ter-assign ke CLM (status apa pun, termasuk done). Dipakai picker Assign untuk
+// men-disable invoice yang sudah masuk CLM: sekali masuk CLM, tak bisa di-assign lagi dari
+// Inbox. Re-follow up assignment yang sudah Done dilakukan lewat tombol Reopen di halaman CLM.
 func clmHandleAssigned(w http.ResponseWriter, r *http.Request) {
 	phone := r.URL.Query().Get("phone")
 	if phone == "" {
 		httpErr(w, 400, "phone required")
 		return
 	}
-	rows, err := auditDB.Query(`SELECT COALESCE(nomer_invoice,'') FROM clm_assignments WHERE phone=? AND status!='done'`, phone)
+	rows, err := auditDB.Query(`SELECT COALESCE(nomer_invoice,'') FROM clm_assignments WHERE phone=?`, phone)
 	if err != nil {
 		httpErr(w, 500, "query: %v", err)
 		return

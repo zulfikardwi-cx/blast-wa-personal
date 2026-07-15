@@ -206,12 +206,12 @@ func TestCLM_IncomingNoopForUnassigned(t *testing.T) {
 	}
 }
 
-// /api/clm/assigned → invoice yang sudah di CLM & aktif (untuk disable di picker); yang done
-// TIDAK ikut (boleh di-assign ulang).
+// /api/clm/assigned → SEMUA invoice yang sudah di CLM (untuk disable di picker), termasuk
+// yang sudah Done: sekali masuk CLM, tak bisa di-assign lagi dari Inbox.
 func TestCLM_AssignedListForPicker(t *testing.T) {
 	setupCLM(t)
 	postAssign(t, "628111", "INV-A", "INV-B")
-	postClmStatusID(t, assignmentID(t, "628111", "INV-B"), "done") // INV-B done → boleh assign lagi
+	postClmStatusID(t, assignmentID(t, "628111", "INV-B"), "done") // INV-B done → tetap disable
 
 	rec := httptest.NewRecorder()
 	clmHandleAssigned(rec, httptest.NewRequest("GET", "/api/clm/assigned?phone=628111", nil))
@@ -219,8 +219,8 @@ func TestCLM_AssignedListForPicker(t *testing.T) {
 	if !strings.Contains(body, "INV-A") {
 		t.Errorf("INV-A (aktif) harus ada di assigned: %s", body)
 	}
-	if strings.Contains(body, "INV-B") {
-		t.Errorf("INV-B (done) tidak boleh ada di assigned (boleh re-assign): %s", body)
+	if !strings.Contains(body, "INV-B") {
+		t.Errorf("INV-B (done) harus TETAP ada di assigned (tak bisa assign lagi): %s", body)
 	}
 }
 
