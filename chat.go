@@ -625,6 +625,7 @@ type ThreadRow struct {
 func handleThreads(w http.ResponseWriter, r *http.Request) {
 	status := r.URL.Query().Get("status")
 	team := r.URL.Query().Get("team")
+	search := strings.TrimSpace(r.URL.Query().Get("q"))
 
 	// build WHERE dinamis dari status + team (filter helper per team)
 	var conds []string
@@ -637,6 +638,11 @@ func handleThreads(w http.ResponseWriter, r *http.Request) {
 		conds = append(conds, "team = ?")
 		qargs = append(qargs, team)
 	}
+	if search != "" {
+		like := "%" + search + "%"
+		conds = append(conds, "(phone LIKE ? OR COALESCE(nama_outlet,'') LIKE ? OR COALESCE(nomer_invoice,'') LIKE ?)")
+		qargs = append(qargs, like, like, like)
+	}
 	where := ""
 	if len(conds) > 0 {
 		where = "WHERE " + strings.Join(conds, " AND ")
@@ -644,7 +650,13 @@ func handleThreads(w http.ResponseWriter, r *http.Request) {
 	// Urut by last_message_at (waktu pesan asli), BUKAN updated_at — supaya buka/klik
 	// thread (yang hanya bump updated_at via mark-read) tidak mengubah urutan. Pesan
 	// terbaru tetap di atas; tiebreak phone biar deterministik (stabil saat re-fetch).
-	q := `SELECT phone, COALESCE(nama_outlet,''), COALESCE(nomer_invoice,''), COALESCE(last_blast_id,0), COALESCE(last_message_at,''), COALESCE(last_message_preview,''), COALESCE(last_message_direction,''), unread_count, status, COALESCE(assigned_email,''), COALESCE(assigned_name,''), COALESCE(team,''), COALESCE(area,''), COALESCE(followup_at,'') FROM chat_threads ` + where + ` ORDER BY last_message_at DESC, phone ASC LIMIT 200`
+	// Saat search aktif, limit dilepas biar hasil lama (di luar top 200 by
+	// last_message_at) tetap ketemu — lihat memory "search-limited-200" bug.
+	limitClause := " LIMIT 200"
+	if search != "" {
+		limitClause = ""
+	}
+	q := `SELECT phone, COALESCE(nama_outlet,''), COALESCE(nomer_invoice,''), COALESCE(last_blast_id,0), COALESCE(last_message_at,''), COALESCE(last_message_preview,''), COALESCE(last_message_direction,''), unread_count, status, COALESCE(assigned_email,''), COALESCE(assigned_name,''), COALESCE(team,''), COALESCE(area,''), COALESCE(followup_at,'') FROM chat_threads ` + where + ` ORDER BY last_message_at DESC, phone ASC` + limitClause
 
 	rows, err := auditDB.Query(q, qargs...)
 	if err != nil {

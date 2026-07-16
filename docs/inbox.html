@@ -510,7 +510,10 @@ async function pollStatus() {
 
 async function loadThreads() {
   try {
-    const r = await apiFetch(`/api/inbox/threads?status=${currentBucket}`).then(r => r.json());
+    let url = `/api/inbox/threads?status=${currentBucket}`;
+    if (currentTeam) url += `&team=${encodeURIComponent(currentTeam)}`;
+    if (searchTerm) url += `&q=${encodeURIComponent(searchTerm)}`;
+    const r = await apiFetch(url).then(r => r.json());
     $('#cAfterBlast').textContent = r.counts.after_blast || 0;
     $('#cNonBlast').textContent = r.counts.inbound_non_blast || 0;
     $('#cOutside').textContent = r.counts.outside_blast || 0;
@@ -539,16 +542,9 @@ async function loadThreads() {
 function renderThreadList() {
   const list = $('#threadList');
   list.innerHTML = '';
-  let filtered = allThreads;
-  if (currentTeam) filtered = filtered.filter(t => (t.team||'') === currentTeam);
-  if (searchTerm) {
-    const s = searchTerm.toLowerCase();
-    filtered = filtered.filter(t =>
-      (t.nama_outlet||'').toLowerCase().includes(s)
-      || t.phone.includes(s)
-      || (t.nomer_invoice||'').toLowerCase().includes(s)
-      || (t.last_preview||'').toLowerCase().includes(s));
-  }
+  // Filtering (team + search) sekarang dilakukan server-side di loadThreads(),
+  // supaya tidak kepotong LIMIT 200 milik query default. allThreads sudah hasil final.
+  const filtered = allThreads;
   if (!filtered.length) {
     list.innerHTML = '<div class="empty">Tidak ada thread' + (currentTeam ? ' untuk team ini' : ' di bucket ini') + '.<br/><small>Coba ganti filter/bucket atau Sync Team.</small></div>';
     return;
@@ -1124,10 +1120,13 @@ $$('.bucket-btn').forEach(b => b.addEventListener('click', () => {
   loadThreads();
 }));
 
-// Search
+// Search — debounced, query lewat backend (bukan filter client-side) supaya
+// thread lama di luar LIMIT 200 default tetap ketemu.
+let searchDebounce = null;
 $('#searchInput').addEventListener('input', e => {
   searchTerm = e.target.value.trim();
-  renderThreadList();
+  clearTimeout(searchDebounce);
+  searchDebounce = setTimeout(loadThreads, 300);
 });
 
 // Team filter — isi dropdown dari daftar team (pertahankan pilihan saat reload)
@@ -1140,7 +1139,7 @@ function populateTeamFilter(teams) {
 }
 $('#teamFilter').addEventListener('change', e => {
   currentTeam = e.target.value;
-  renderThreadList();
+  loadThreads();
 });
 
 // Sync Team dari Google Sheet (tab Query Blast)

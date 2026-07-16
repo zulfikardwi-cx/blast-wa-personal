@@ -306,11 +306,20 @@ $$('.bucket-btn').forEach(btn => btn.addEventListener('click', () => {
   loadThreads();
 }));
 
-$('#searchInput').addEventListener('input', e => { searchTerm = e.target.value.trim().toLowerCase(); renderThreads(); });
+// Search — debounced, query lewat backend (bukan filter client-side) supaya
+// assignment lama di luar LIMIT 300 default tetap ketemu.
+let searchDebounce = null;
+$('#searchInput').addEventListener('input', e => {
+  searchTerm = e.target.value.trim().toLowerCase();
+  clearTimeout(searchDebounce);
+  searchDebounce = setTimeout(loadThreads, 300);
+});
 
 async function loadThreads() {
   try {
-    const r = await apiFetch(`/api/clm/threads?status=${encodeURIComponent(currentBucket)}`).then(r => r.json());
+    let url = `/api/clm/threads?status=${encodeURIComponent(currentBucket)}`;
+    if (searchTerm) url += `&q=${encodeURIComponent(searchTerm)}`;
+    const r = await apiFetch(url).then(r => r.json());
     allThreads = r.threads || [];
     const c = r.counts || {};
     $('#cNew').textContent = c.new || 0;
@@ -323,12 +332,8 @@ async function loadThreads() {
 
 function renderThreads() {
   const list = $('#threadList');
-  let items = allThreads;
-  if (searchTerm) {
-    items = items.filter(t => (t.nama_outlet||'').toLowerCase().includes(searchTerm)
-      || (t.phone||'').includes(searchTerm)
-      || (t.nomer_invoice||'').toLowerCase().includes(searchTerm));
-  }
+  // Filtering search sekarang server-side (lihat loadThreads) supaya tidak kepotong LIMIT.
+  const items = allThreads;
   $('#listCount').textContent = items.length;
   if (!items.length) { list.innerHTML = '<div class="empty">Belum ada assignment di bucket ini.</div>'; return; }
   list.innerHTML = '';

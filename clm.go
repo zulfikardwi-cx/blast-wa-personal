@@ -345,11 +345,26 @@ type CLMThreadRow struct {
 // Preview diambil dari clm_messages (timeline CLM sendiri), bukan Inbox.
 func clmHandleThreads(w http.ResponseWriter, r *http.Request) {
 	status := r.URL.Query().Get("status")
-	var where string
+	search := strings.TrimSpace(r.URL.Query().Get("q"))
+	var conds []string
 	var qargs []any
 	if status != "" && status != "all" {
-		where = "WHERE c.status = ?"
+		conds = append(conds, "c.status = ?")
 		qargs = append(qargs, status)
+	}
+	if search != "" {
+		like := "%" + search + "%"
+		conds = append(conds, "(c.phone LIKE ? OR COALESCE(c.nama_outlet,'') LIKE ? OR COALESCE(c.nomer_invoice,'') LIKE ?)")
+		qargs = append(qargs, like, like, like)
+	}
+	where := ""
+	if len(conds) > 0 {
+		where = "WHERE " + strings.Join(conds, " AND ")
+	}
+	// Saat search aktif, limit dilepas biar assignment lama (di luar top 300) tetap ketemu.
+	limitClause := "\nLIMIT 300"
+	if search != "" {
+		limitClause = ""
 	}
 	q := `
 SELECT c.id, c.phone, COALESCE(c.nomer_invoice,''), COALESCE(c.nama_outlet,''), c.status, COALESCE(c.assigned_name,''),
@@ -357,8 +372,7 @@ SELECT c.id, c.phone, COALESCE(c.nomer_invoice,''), COALESCE(c.nama_outlet,''), 
 FROM clm_assignments c
 LEFT JOIN clm_messages m ON m.id = (SELECT id FROM clm_messages m2 WHERE m2.assignment_id=c.id ORDER BY m2.id DESC LIMIT 1)
 ` + where + `
-ORDER BY COALESCE(NULLIF(m.timestamp,''), c.updated_at) DESC, c.id DESC
-LIMIT 300`
+ORDER BY COALESCE(NULLIF(m.timestamp,''), c.updated_at) DESC, c.id DESC` + limitClause
 	rows, err := auditDB.Query(q, qargs...)
 	if err != nil {
 		httpErr(w, 500, "query: %v", err)
